@@ -187,6 +187,20 @@ For each relevant test change:
 
 ### Step 7: Build and Test
 
+**CRITICAL**: Before comparing test results, ensure both JS and Kotlin test vectors are synchronized:
+
+```bash
+# Update JS test vectors
+cd /Users/limp/dev/qr-root/qr-paulmillr
+git submodule update --init --recursive
+
+# Update Kotlin test vectors (already covered in Step 6)
+cd /Users/limp/dev/qr-root/qr
+git submodule update --init --recursive
+cd test/vectors
+git checkout <commit-hash-from-js>
+```
+
 Build the Kotlin project:
 ```bash
 cd /Users/limp/dev/qr-root/qr
@@ -203,9 +217,135 @@ Run tests:
 ./gradlew test
 ```
 
+**Compare test results with JavaScript**:
+
+Run JS tests:
+```bash
+cd /Users/limp/dev/qr-root/qr-paulmillr
+npm install  # If needed
+npm test
+```
+
+**Goal: Maintain test parity**
+
+Compare pass rates:
+- JS: Check test output for total passed/failed
+- Kotlin: Check VectorTest output (e.g., "9134 / 9281 passed")
+- **Target**: Kotlin pass rate ≥ JS pass rate
+
+If Kotlin pass rate is lower:
+1. Identify which tests pass in JS but fail in Kotlin
+2. Use the debugging algorithm (see Step 8a)
+3. Fix the differences
+4. Re-run tests and verify parity
+
 Capture and parse output.
 
-### Step 8: Auto-Fix Test Failures
+### Step 8a: Debug Algorithm for Test Parity Issues
+
+When a test passes in JS but fails in Kotlin, use this systematic debugging approach:
+
+**Algorithm**:
+
+1. **Isolate failing test**
+   - Identify the specific test case (e.g., vector index 359)
+   - Create a minimal test file focusing on this case
+
+2. **Add debug information to JS**
+   ```javascript
+   // In qr-paulmillr, create test/debug-case-359.test.js
+   import { should } from '@paulmillr/jsbt/test.js';
+   import readQR from '../src/decode.ts';
+
+   should('debug case 359', () => {
+     const img = ...; // Load the failing case
+     console.log('Input image size:', img.width, img.height);
+     console.log('Input image data (first 100):', img.data.slice(0, 100));
+
+     const result = readQR(img);
+     console.log('Result:', result);
+     console.log('Result length:', result.length);
+     console.log('Result bytes:', [...result].map(c => c.charCodeAt(0)));
+   });
+   ```
+
+3. **Run JS debug test and collect output**
+   ```bash
+   cd /Users/limp/dev/qr-root/qr-paulmillr
+   npm test -- test/debug-case-359.test.js
+   ```
+   Save output to a file for comparison.
+
+4. **Create equivalent Kotlin debug test**
+   ```kotlin
+   // In qr/src/test/kotlin/qr/DebugCase359Test.kt
+   import org.junit.jupiter.api.Test
+
+   class DebugCase359Test {
+       @Test
+       fun `debug case 359`() {
+           val img = ... // Load the same case
+           println("Input image size: ${img.width} ${img.height}")
+           println("Input image data (first 100): ${img.data.take(100)}")
+
+           val result = QRDecoder.decode(img)
+           println("Result: $result")
+           println("Result length: ${result.length}")
+           println("Result bytes: ${result.map { it.code }}")
+       }
+   }
+   ```
+
+5. **Run Kotlin debug test and collect output**
+   ```bash
+   cd /Users/limp/dev/qr-root/qr
+   ./gradlew test --tests "DebugCase359Test"
+   ```
+
+6. **Compare debug outputs side by side**
+   - Input validation: Same image dimensions and data?
+   - Intermediate steps: Pattern detection, transformation, etc.
+   - Output comparison: Character-by-character differences
+   - Encoding: Check byte values (ECI encoding issue?)
+
+7. **Identify differences**
+   Common issues:
+   - ECI encoding mismatch (wrong charset)
+   - Bitmap coordinate swap (x/y reversed)
+   - Off-by-one errors in loops
+   - Null handling differences
+   - Integer division vs float division
+
+8. **Fix the issue**
+   Based on identified difference, apply fix to Kotlin code.
+
+9. **Verify fix**
+   ```bash
+   ./gradlew test --tests "DebugCase359Test"
+   ./gradlew test  # Full test suite
+   ```
+
+10. **Repeat for remaining failures**
+    Continue with next failing test case.
+
+**Example debug session**:
+
+```
+JS output:
+  Input image size: 25 25
+  Result: "Hello 世界"
+  Result bytes: [72, 101, 108, 108, 111, 32, 228, 184, 150, 231, 149, 140]
+
+Kotlin output:
+  Input image size: 25 25
+  Result: "Hello ???"
+  Result bytes: [72, 101, 108, 108, 111, 32, 63, 63, 63]
+
+→ Diagnosis: UTF-8 decoding issue (bytes 228, 184, 150 should decode to 世)
+→ Fix: Check ECI encoding is set to UTF-8 (code 26)
+```
+
+### Step 8b: Auto-Fix Test Failures (General)
 
 If tests fail, attempt automatic fixes (up to 3 iterations).
 
