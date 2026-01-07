@@ -168,11 +168,22 @@ For each relevant test change:
    - `assert.ok(cond)` → `assertTrue(cond)`
    - `assert.throws(() => ...)` → `assertThrows<ExceptionType> { ... }`
 
-3. **Update test vectors** if needed:
+3. **CRITICAL: Synchronize test vectors submodule**:
+   Both repositories use the same test vectors from a git submodule. They MUST be at the same commit.
+
    ```bash
+   # Check JS library's test vectors version
+   cd /Users/limp/dev/qr-root/qr-paulmillr
+   git submodule status test/vectors  # Note the commit hash
+
+   # Update Kotlin test vectors to match
    cd /Users/limp/dev/qr-root/qr
-   git submodule update --remote test/vectors
+   git submodule update --init --recursive
+   cd test/vectors
+   git checkout <commit-hash-from-js>  # Use the hash from above
    ```
+
+   **Important**: Test vectors must be initialized and at the same commit for tests to pass.
 
 ### Step 7: Build and Test
 

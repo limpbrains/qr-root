@@ -46,11 +46,20 @@ Each submodule has its own CLAUDE.md or README with detailed build and developme
 
 This section tracks the synchronization state between the JavaScript QR library (qr-paulmillr) and the Kotlin port (qr).
 
-**Last synchronized commit**: Not yet synced
-**Last sync date**: N/A
-**Sync status**: Not yet synced
+**Last synchronized commit**: 0fbd0a42e7bbb6d295177f154d04e5b34e765cea
+**Last sync date**: 2026-01-07T19:50:00Z
+**Sync status**: success
 
-To perform the first sync, ask Claude to "sync qr" or use the sync-qr skill.
+**Changes ported** (from commit 1b146a4..0fbd0a4):
+- Added ECI encoding support (20+ character encodings: UTF-8, ISO-8859-*, Shift-JIS, Big5, GBK, EUC-KR, Windows-125x)
+- Added inverted QR code detection (white-on-black QR codes)
+- Added Bitmap.negate() method for bit inversion
+- Performance improvements
+
+**Test results**:
+- VectorTest: 9134/9281 (98.42%) ✓ Baseline maintained
+- All 63 unit tests: PASSED ✓
+- Build: SUCCESS ✓
 
 ### Sync Process
 
