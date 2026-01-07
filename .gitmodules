@@ -8,3 +8,6 @@
 [submodule "react-native-camera-kit-no-google"]
 	path = react-native-camera-kit-no-google
 	url = git@github.com:limpbrains/react-native-camera-kit-no-google.git
+[submodule "react-native-camera-kit-tesla"]
+	path = react-native-camera-kit-tesla
+	url = git@github.com:teslamotors/react-native-camera-kit.git
