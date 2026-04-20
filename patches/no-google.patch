@@ -1,0 +1,875 @@
+diff --git a/.gitignore b/.gitignore
+index 703f792..7ae6ec9 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -95,3 +95,5 @@ dist/
+ android/generated/ReactCodegen.podspec
+ 
+ example/.rock/cache/
++
++.claude/
+diff --git a/CLAUDE.md b/CLAUDE.md
+new file mode 100644
+index 0000000..7d69471
+--- /dev/null
++++ b/CLAUDE.md
+@@ -0,0 +1,261 @@
++# CLAUDE.md
++
++This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
++
++## Project Overview
++
++React Native Camera Kit is a high-performance, cross-platform camera library for React Native applications (iOS and Android). It provides:
++- Photo capture with high performance optimization
++- Barcode/QR code scanning capabilities
++- Camera preview support (including iOS simulator)
++- Extensive camera control options (flash, focus, zoom, torch)
++- Device orientation detection
++
++This is a native library that uses React Native Codegen for cross-platform native module bindings.
++
++## Architecture
++
++### JavaScript/TypeScript Layer (`src/`)
++
++The TypeScript codebase provides the React wrapper and type definitions:
++
++- **Entry point** (`src/index.ts`): Exports the Camera component, types, and Orientation constants
++- **Camera component** (`src/Camera.tsx`): Platform-agnostic wrapper that lazy-loads platform-specific implementations
++  - `src/Camera.ios.tsx`: iOS-specific camera component
++  - `src/Camera.android.tsx`: Android-specific camera component
++- **Types and props**:
++  - `src/types.ts`: Core type definitions (CameraType, CodeFormat, TorchMode, FlashMode, FocusMode, ZoomMode, ResizeMode, CameraApi, CaptureData)
++  - `src/CameraProps.ts`: Complete Camera component props interface (both platform-specific and shared)
++- **Native specs** (`src/specs/`):
++  - `CameraNativeComponent.ts`: React Native Codegen definition for the camera view component (NativeProps)
++  - `NativeCameraKitModule.ts`: TurboModule specification for native camera functions (capture, authorization)
++
++**Key Pattern**: Optional numeric props are represented as `-1` or `undefined` until React Native Fabric supports optional values. Both platform-specific implementations handle this conversion.
++
++### Native Layer
++
++- **iOS** (`ios/ReactNativeCameraKit/`): Swift implementation
++  - `RealCamera.swift` / `SimulatorCamera.swift`: Core camera implementation (real and simulator)
++  - `CameraManager.swift`: Manages camera state and configuration
++  - `PhotoCaptureDelegate.swift`: Handles photo capture logic
++  - `ScannerInterfaceView.swift` / `ScannerFrameView.swift`: Barcode scanning UI
++  - `RatioOverlayView.swift`: Aspect ratio guide overlay
++
++- **Android** (`android/src/main/java/com/rncamerakit/`): Kotlin implementation
++  - `CKCamera.kt`: Main camera view component
++  - `QRCodeAnalyzer.kt`: Barcode scanning using CameraX
++  - Event classes in `events/`: Handle camera callbacks (zoom, orientation, errors, etc.)
++  - Platform-specific code split between `newarch/` (React Native 0.73+, Fabric) and `oldarch/` (legacy)
++
++## Development Commands
++
++### Build and Compilation
++
++```bash
++# Build TypeScript to JavaScript (outputs to dist/)
++yarn build
++
++# Clean build artifacts
++yarn clean
++
++# Run both clean and build
++yarn clean && yarn build
++```
++
++### Linting and Code Quality
++
++```bash
++# Run ESLint
++yarn lint
++
++# ESLint rules are configured in .eslintrc.js with:
++# - Max line length: 120 characters
++# - Required semicolons, proper indentation (2 spaces)
++# - No console.log or debugger statements allowed
++# - Strict import resolution checking
++```
++
++### Testing
++
++```bash
++# Run all tests
++yarn test
++
++# Run tests for a specific file
++yarn test -- src/__tests__/index.test.tsx
++
++# The project uses Jest with minimal test configuration
++# Tests should be placed in __tests__ directories
++```
++
++### Example Project
++
++```bash
++# Bootstrap the example app (installs dependencies and pods)
++yarn bootstrap
++
++# For Linux:
++yarn bootstrap-linux
++```
++
++## Key Development Notes
++
++### Native Component Integration
++
++The camera component uses **React Native Codegen** to auto-generate native binding code:
++- Props are defined in `src/specs/CameraNativeComponent.ts` (NativeProps interface)
++- Changes to props require running: `yarn codegen` (generates `build/` directory)
++- The codegen config is in `package.json` under `codegenConfig`
++
++### Platform-Specific Code
++
++The library uses React Native's platform module for loading platform-specific implementations:
++```typescript
++// In src/Camera.tsx
++const Camera = lazy(() =>
++  Platform.OS === 'ios'
++    ? import('./Camera.ios')
++    : import('./Camera.android'),
++);
++```
++
++Both implementations handle color props differently:
++- **Android**: Uses `processColor()` to convert color values
++- **iOS**: Passes colors as-is
++
++### Optional Props Pattern
++
++React Native Codegen doesn't support optional numeric props, so:
++- Numeric props default to `-1` to indicate "undefined"
++- The native layer interprets `-1` as "no value provided"
++- This affects: `zoom`, `maxZoom`, `scanThrottleDelay`, `resetFocusTimeout`, `shutterAnimationDuration`
++
++### Type System
++
++The project uses strict TypeScript (`strict: true` in tsconfig.json):
++- `@ts-expect-error` comments are used for Codegen type mismatches (see Camera.ios.tsx line 33)
++- Type definitions must be accurate between user-facing types and native specs
++- All numeric types from Codegen props must be converted in both platform files
++
++## Testing and Releases
++
++### Running Tests
++
++```bash
++# Run Jest tests
++yarn test
++
++# Build TypeScript (validates code)
++yarn build
++
++# Test files follow Jest conventions and are excluded from build (tsconfig.json excludes *.test.tsx)
++```
++
++### Release Process
++
++```bash
++# Standard npm release
++yarn release
++
++# Beta release
++yarn release:beta
++
++# Local testing (creates and opens tar.gz)
++yarn release:local
++```
++
++The library is published to npm as `react-native-camera-kit` with the `files` array in package.json controlling what gets included in the published bundle.
++
++## Important Configuration Details
++
++- **TypeScript**: Strict mode enabled, targets ESNext, outputs to `dist/` with declaration files
++- **Package managers**: Yarn 1.22.22 required (specified in package.json engines)
++- **Node**: Requires Node.js >= 18
++- **React Native**: Uses version 0.79.0, supports both legacy and new architecture (Fabric)
++- **Import resolution**: ESLint is configured to recognize `.ios.tsx`, `.android.tsx`, and `.js` platform variants
++
++---
++
++## Camera Kit Sync State
++
++**Last synchronized upstream commit**: cc6515b914a34ef79d8fdba527e878761047b02a
++**Upstream version**: 16.2.0
++**Fork version**: 16.1.3
++**Last sync date**: 2026-01-07T23:03:00Z
++**Sync status**: success
++**Fork point**: 5a709e0
++
++### Changes Synced (commits 5a709e0..cc6515b)
++
++**Commit range**: 12 commits from upstream
++
++**iOS Improvements** (8 files, fully synced):
++- Added mount stress test support (CameraView.swift, RealCamera.swift, SimulatorCamera.swift)
++- Added `allowedBarcodeTypes` barcode filtering for iOS (CodeFormat.swift, CKCameraViewComponentView.mm, CameraView.swift)
++- All iOS files synced successfully - no conflicts with QR-only fork
++
++**TypeScript Layer** (7 files, fully synced):
++- Updated Camera.ios.tsx, Camera.android.tsx with `allowedBarcodeTypes` prop
++- Updated CameraProps.ts, types.ts, src/index.ts with new barcode filtering types
++- Updated specs/CameraNativeComponent.ts with Codegen prop definitions
++- All TypeScript changes synced - prop works on iOS, gracefully handled on Android (QR-only)
++
++**Example App** (3 files, fully synced):
++- Added mount stress test to App.tsx and CameraExample.tsx
++- Added `allowedBarcodeTypes={['qr', 'ean-13']}` example to BarcodeScreenExample.tsx
++- Example demonstrates the prop even though Android fork only scans QR codes
++
++**Config Files**:
++- Moved .nvmrc from example/ to root directory
++
++**Documentation**:
++- README.md: Added `allowedBarcodeTypes` prop documentation with note: "Android only supports `'qr'` in this fork. iOS supports all formats."
++
++### Changes Skipped (Android Barcode Conflicts)
++
++**android/src/main/java/com/rncamerakit/CKCamera.kt** (commits ea894d9, 2a1f06a, f8be0f0, cc6d18c, 4cbec39):
++- **Upstream changes**: Added `allowedBarcodeTypes` property and barcode filtering logic using `List<Barcode>` callback
++- **Fork incompatibility**: Fork uses `onBarcodeRead(String)` callback (single QR string), upstream uses `onBarcodeRead(List<Barcode>, Size)` (multiple barcodes with bounding boxes)
++- **Action**: Skipped all barcode filtering logic entirely
++- **Rationale**: Fork's QR-only architecture with limpbrains/qr decoder is fundamentally incompatible with multi-format filtering
++
++**android/src/main/java/com/rncamerakit/CKCameraManager.kt** (commits cc6d18c, 6d0bed7):
++- **Upstream changes**: Added `setAllowedBarcodeTypes` property setter
++- **Action**: Skipped entirely
++- **Rationale**: Fork doesn't use barcode type filtering (QR-only)
++
++**package.json**:
++- **Upstream change**: Version bump from 16.1.3 → 16.2.0
++- **Action**: Skipped version change
++- **Rationale**: Fork maintains independent versioning (currently 16.1.3)
++
++### Selective Sync Summary
++
++**CodeFormat.kt**: ✅ Partial sync (1 hunk applied, 1 hunk skipped)
++- ✅ **Applied**: Added `UPC_A("upc-a")` enum value (line 11)
++- ❌ **Skipped**: `fromName()` helper method (fork doesn't need it, has no ML Kit conversions)
++- **Rationale**: New enum values are harmless future-proofing, even if fork doesn't use them
++
++### Fork-Specific Code Preserved
++
++All QR-only Android architecture preserved:
++- `android/build.gradle` - Still uses `implementation 'com.github.limpbrains:qr:v0.0.1'`
++- `android/src/main/java/com/rncamerakit/QRCodeAnalyzer.kt` - Still uses `QRDecoder.decode()` from limpbrains/qr
++- `android/src/main/java/com/rncamerakit/CodeFormat.kt` - Simplified enum structure (no ML Kit conversions)
++- `android/src/main/java/com/rncamerakit/CKCamera.kt` - String callback signature preserved
++
++### Sync Statistics
++
++- **Files auto-synced (Category A)**: 19 files (iOS, TypeScript, Example, Config)
++- **Files selectively synced (Category B)**: 2 files (CodeFormat.kt partial, README.md with fork note)
++- **Files skipped (Category B)**: 3 files (CKCamera.kt, CKCameraManager.kt, package.json)
++- **Hunks applied**: 1 hunk (UPC_A enum)
++- **Hunks skipped**: ~50+ hunks (all Android barcode filtering logic)
++
++### Notes
++
++- Fork successfully synced all upstream improvements to iOS and TypeScript layers
++- `allowedBarcodeTypes` prop is now documented and works on iOS
++- Android continues to use QR-only scanning with limpbrains/qr decoder
++- No Google ML Kit dependencies introduced
++- All build integrity checks passed (see test results below)
+diff --git a/README.md b/README.md
+index 8f5d9b2..a3f71e9 100644
+--- a/README.md
++++ b/README.md
+@@ -1,20 +1,48 @@
+ <h1 align="center">
+-    🎈 React Native Camera Kit
++    🎈 React Native Camera Kit (No Google)
+ </h1>
+ 
+ <p align="center">
+   A <strong>high performance, easy to use, rock solid</strong><br>
+-  camera library for React Native apps.
++  camera library for React Native apps.<br>
++  <strong>No Google ML Kit dependency.</strong>
+ </p>
+ 
+ <p align="center">
+-  <a href="https://github.com/teslamotors/react-native-camera-kit/blob/master/LICENSE">
++  <a href="https://github.com/limpbrains/react-native-camera-kit-no-google/blob/master/LICENSE">
+     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="React Native Camera Kit is released under the MIT license." />
+   </a>
+-  <a href="https://www.npmjs.org/package/react-native-camera-kit">
+-    <img src="https://badge.fury.io/js/react-native-camera-kit.svg" alt="Current npm package version." />
++  <a href="https://www.npmjs.org/package/react-native-camera-kit-no-google">
++    <img src="https://badge.fury.io/js/react-native-camera-kit-no-google.svg" alt="Current npm package version." />
+   </a>
+ </p>
++
++> **⚠️ Fork Notice**
++>
++> This is a fork of [teslamotors/react-native-camera-kit](https://github.com/teslamotors/react-native-camera-kit) with **Google ML Kit removed** from Android.
++>
++> **Why?** Google ML Kit is closed source. This fork uses a completely open source pure Kotlin QR decoder instead.
++
++## Key Differences from Original
++
++| Feature | Original | This Fork |
++|---------|----------|-----------|
++| Android barcode library | Google ML Kit (closed source) | Pure Kotlin ([limpbrains/qr](https://github.com/limpbrains/qr)) |
++| Source code | Closed source (ML Kit) | Fully open source |
++| Google Play Services | Required | Not required |
++| Barcode formats | Multiple formats | **QR codes only** |
++
++### Limitations
++
++- **Android barcode scanning supports QR codes only** (no EAN, UPC, Code128, etc.)
++- iOS barcode scanning is unchanged (uses native AVFoundation, supports all formats)
++
++### QR Decoder Attribution
++
++The Android QR decoder is based on:
++- [limpbrains/qr](https://github.com/limpbrains/qr) - Kotlin QR code reader library
++- [paulmillr/qr](https://github.com/paulmillr/qr) - Original JavaScript implementation by Paul Miller
++
+ <table>
+   <tr>
+     <td>
+@@ -24,8 +52,9 @@
+       <ul>
+         <li><h3>Cross Platform (iOS and Android)</h3></li>
+         <li><h3>Optimized for performance and high photo capture rate</h3></li>
+-        <li><h3>QR / Barcode scanning support</h3></li>
++        <li><h3>QR Code scanning support (QR only on Android)</h3></li>
+         <li><h3>Camera preview support in iOS simulator</h3></li>
++        <li><h3>No Google dependencies</h3></li>
+       </ul>
+     </td>
+   </tr>
+@@ -34,7 +63,7 @@
+ ## Installation (RN > 0.60)
+ 
+ ```bash
+-yarn add react-native-camera-kit
++yarn add react-native-camera-kit-no-google
+ ```
+ 
+ ```bash
+@@ -143,7 +172,7 @@ Add the following usage descriptions to your `Info.plist` (usually found at: `io
+ Barebones camera component if you need advanced/customized interface
+ 
+ ```ts
+-import { Camera, CameraType } from 'react-native-camera-kit';
++import { Camera, CameraType } from 'react-native-camera-kit-no-google';
+ ```
+ 
+ ```tsx
+@@ -184,8 +213,8 @@ Additionally, the Camera can be used for barcode scanning
+ | `onZoom`                        | Function                               | Callback when user makes a pinch gesture, regardless of what the `zoom` prop was set to. Returned event contains `zoom`. Ex: `onZoom={(e) => console.log(e.nativeEvent.zoom)}`.                                                                                                                                                                                                                                                                            |
+ | `torchMode`                     | `'on'`/`'off'`                         | Toggle flash light when camera is active. Default: `off`                                                                                                                                                                                                                                                                                                                                                                                                   |
+ | `cameraType`                    | CameraType.Back/CameraType.Front       | Choose what camera to use. Default: `CameraType.Back`                                                                                                                                                                                                                                                                                                                                                                                                      |
+-| `onOrientationChange`           | Function                               | Callback when physical device orientation changes. Returned event contains `orientation`. Ex: `onOrientationChange={(event) => console.log(event.nativeEvent.orientation)}`. Use `import { Orientation } from 'react-native-camera-kit'; if (event.nativeEvent.orientation === Orientation.PORTRAIT) { ... }` to understand the new value                                                                                                                  |
+-| `allowedBarcodeTypes`           | string[]                               | Limits which barcode formats can be detected. Ex: `['code-128', 'code-39', 'code-93', 'codabar', 'ean-13', 'ean-8', 'itf', 'upc-a', 'upc-e', 'pdf-417', 'aztec', 'data-matrix', 'code-128']`. If empty or omitted, all supported formats are scanned.                                                                                                                                                                                                      |
++| `onOrientationChange`           | Function                               | Callback when physical device orientation changes. Returned event contains `orientation`. Ex: `onOrientationChange={(event) => console.log(event.nativeEvent.orientation)}`. Use `import { Orientation } from 'react-native-camera-kit-no-google'; if (event.nativeEvent.orientation === Orientation.PORTRAIT) { ... }` to understand the new value                                                                                                       |
++| `allowedBarcodeTypes`           | string[]                               | Limits which barcode formats can be detected. Ex: `['qr', 'ean-13', 'code-128']`. If empty or omitted, all supported formats are scanned. **Note**: Android only supports `'qr'` in this fork. iOS supports all formats.                                                                                                                                                                                                                                   |
+ | **Android only**                |
+ | `onError`                       | Function                               | Android only. Callback when camera fails to initialize. Ex: `onError={(e) => console.log(e.nativeEvent.errorMessage)}`.                                                                                                                                                                                                                                                                                                                                    |
+ | `shutterPhotoSound`             | `boolean`                              | Android only. Enable or disable the shutter sound when capturing a photo. Default: `true`                                                                                                                                                                                                                                                                                                                                                                  |
+diff --git a/ReactNativeCameraKit.podspec b/ReactNativeCameraKit.podspec
+index 36ad9a2..5d820a3 100644
+--- a/ReactNativeCameraKit.podspec
++++ b/ReactNativeCameraKit.podspec
+@@ -9,10 +9,10 @@ Pod::Spec.new do |s|
+   s.license      = "MIT"
+ 
+   s.authors      = "CameraKit"
+-  s.homepage     = "https://github.com/teslamotors/react-native-camera-kit"
++  s.homepage     = "https://github.com/limpbrains/react-native-camera-kit-no-google"
+   s.platform     = :ios, "15.0"
+ 
+-  s.source       = { :git => "https://github.com/teslamotors/react-native-camera-kit.git", :tag => "v#{s.version}" }
++  s.source       = { :git => "https://github.com/limpbrains/react-native-camera-kit-no-google.git", :tag => "v#{s.version}" }
+   s.source_files = [
+     # Exclude .h files as they cause Swift compiler to treat them as C files, but they are C++
+     # See https://github.com/facebook/react-native/issues/45424#issuecomment-2354737063
+diff --git a/android/build.gradle b/android/build.gradle
+index 6cc0733..cb2eda5 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -66,8 +66,9 @@ dependencies {
+     // If you want to additionally use the CameraX Extensions library
+     // implementation "androidx.camera:camera-extensions:${camerax_version}"
+ 
+-    implementation 'com.google.mlkit:barcode-scanning:17.3.0'
++    implementation 'com.github.limpbrains:qr:v0.0.2'
+ }
+ repositories {
+     mavenCentral()
++    maven { url 'https://jitpack.io' }
+ }
+diff --git a/android/src/main/java/com/rncamerakit/CKCamera.kt b/android/src/main/java/com/rncamerakit/CKCamera.kt
+index 928c5e3..a3789c0 100644
+--- a/android/src/main/java/com/rncamerakit/CKCamera.kt
++++ b/android/src/main/java/com/rncamerakit/CKCamera.kt
+@@ -45,7 +45,6 @@ import android.graphics.Rect
+ import android.graphics.RectF
+ import android.util.Size
+ import com.facebook.react.uimanager.UIManagerHelper
+-import com.google.mlkit.vision.barcode.common.Barcode
+ import com.rncamerakit.events.*
+ 
+ class RectOverlay constructor(context: Context) :
+@@ -342,53 +341,8 @@ class CKCamera(context: ThemedReactContext) : FrameLayout(context), LifecycleObs
+         val useCases = mutableListOf(preview, imageCapture)
+ 
+         if (scanBarcode) {
+-            val analyzer = QRCodeAnalyzer({ barcodes, imageSize ->
+-                if (barcodes.isEmpty()) return@QRCodeAnalyzer
+-
+-                // 1. Filter by allowed barcode formats
+-                val allowedTypes = convertAllowedBarcodeTypes()
+-                val filteredByType = if (allowedTypes.isEmpty()) {
+-                    barcodes
+-                } else {
+-                    barcodes.filter { barcode ->
+-                        barcode.format in allowedTypes
+-                    }
+-                }
+-
+-                if (filteredByType.isEmpty()) return@QRCodeAnalyzer
+-
+-                val barcodeFrame = barcodeFrame
+-                val vf = viewFinder
+-
+-                // 2. No frame? → behave like original code
+-                if (barcodeFrame == null) {
+-                    onBarcodeRead(filteredByType)
+-                    return@QRCodeAnalyzer
+-                }
+-
+-                val frameRect = barcodeFrame.frameRect
+-
+-                // 3. Calculate scaling factors (image is always rotated by 90 degrees)
+-                val scaleX = vf.width.toFloat() / imageSize.height
+-                val scaleY = vf.height.toFloat() / imageSize.width
+-
+-                // 4. filter barcodes inside the frame
+-                val filteredBarcodes = filteredByType.filter { barcode ->
+-                    val barcodeBoundingBox = barcode.boundingBox ?: return@filter false
+-
+-                    val scaledBarcodeBoundingBox = Rect(
+-                        (barcodeBoundingBox.left * scaleX).toInt(),
+-                        (barcodeBoundingBox.top * scaleY).toInt(),
+-                        (barcodeBoundingBox.right * scaleX).toInt(),
+-                        (barcodeBoundingBox.bottom * scaleY).toInt()
+-                    )
+-                    frameRect.contains(scaledBarcodeBoundingBox)
+-                }
+-
+-                // 5. Emit if any left
+-                if (filteredBarcodes.isNotEmpty()) {
+-                    onBarcodeRead(filteredBarcodes)
+-                }
++            val analyzer = QRCodeAnalyzer({ decodedValue ->
++                onBarcodeRead(decodedValue)
+             }, scanThrottleDelay)
+             imageAnalyzer!!.setAnalyzer(cameraExecutor, analyzer)
+             useCases.add(imageAnalyzer)
+@@ -539,12 +493,11 @@ class CKCamera(context: ThemedReactContext) : FrameLayout(context), LifecycleObs
+         rectOverlay.drawRectBounds(focusRects)
+     }
+ 
+-    private fun onBarcodeRead(barcodes: List<Barcode>) {
+-        val codeFormat = CodeFormat.fromBarcodeType(barcodes.first().format);
++    private fun onBarcodeRead(decodedValue: String) {
+         val surfaceId = UIManagerHelper.getSurfaceId(currentContext)
+         UIManagerHelper
+             .getEventDispatcherForReactTag(currentContext, id)
+-            ?.dispatchEvent(ReadCodeEvent(surfaceId, id, barcodes.first().rawValue, codeFormat.code))
++            ?.dispatchEvent(ReadCodeEvent(surfaceId, id, decodedValue, CodeFormat.QR.code))
+     }
+ 
+     private fun onOrientationChange(orientation: Int) {
+diff --git a/android/src/main/java/com/rncamerakit/CodeFormat.kt b/android/src/main/java/com/rncamerakit/CodeFormat.kt
+index 907c6c3..c7b6dc0 100644
+--- a/android/src/main/java/com/rncamerakit/CodeFormat.kt
++++ b/android/src/main/java/com/rncamerakit/CodeFormat.kt
+@@ -1,7 +1,5 @@
+ package com.rncamerakit
+ 
+-import com.google.mlkit.vision.barcode.common.Barcode
+-
+ enum class CodeFormat(val code: String) {
+     CODE_128("code-128"),
+     CODE_39("code-39"),
+@@ -17,47 +15,4 @@ enum class CodeFormat(val code: String) {
+     AZTEC("aztec"),
+     DATA_MATRIX("data-matrix"),
+     UNKNOWN("unknown");
+-
+-    fun toBarcodeType(): Int {
+-        return when (this) {
+-            CODE_128 -> Barcode.FORMAT_CODE_128
+-            CODE_39 -> Barcode.FORMAT_CODE_39
+-            CODE_93 -> Barcode.FORMAT_CODE_93
+-            CODABAR -> Barcode.FORMAT_CODABAR
+-            EAN_13 -> Barcode.FORMAT_EAN_13
+-            EAN_8 -> Barcode.FORMAT_EAN_8
+-            ITF -> Barcode.FORMAT_ITF
+-            UPC_A -> Barcode.FORMAT_UPC_A
+-            UPC_E -> Barcode.FORMAT_UPC_E
+-            QR -> Barcode.FORMAT_QR_CODE
+-            PDF_417 -> Barcode.FORMAT_PDF417
+-            AZTEC -> Barcode.FORMAT_AZTEC
+-            DATA_MATRIX -> Barcode.FORMAT_DATA_MATRIX
+-            UNKNOWN -> -1 // Or any other default value you prefer
+-        }
+-    }
+-
+-    companion object {
+-        fun fromBarcodeType(@Barcode.BarcodeFormat barcodeType: Int): CodeFormat =
+-            when (barcodeType) {
+-                Barcode.FORMAT_CODE_128 -> CODE_128
+-                Barcode.FORMAT_CODE_39 -> CODE_39
+-                Barcode.FORMAT_CODE_93 -> CODE_93
+-                Barcode.FORMAT_CODABAR -> CODABAR
+-                Barcode.FORMAT_EAN_13 -> EAN_13
+-                Barcode.FORMAT_EAN_8 -> EAN_8
+-                Barcode.FORMAT_ITF -> ITF
+-                Barcode.FORMAT_UPC_A -> UPC_A
+-                Barcode.FORMAT_UPC_E -> UPC_E
+-                Barcode.FORMAT_QR_CODE -> QR
+-                Barcode.FORMAT_PDF417 -> PDF_417
+-                Barcode.FORMAT_AZTEC -> AZTEC
+-                Barcode.FORMAT_DATA_MATRIX -> DATA_MATRIX
+-                else -> UNKNOWN
+-            }
+-        
+-        fun fromName(name: String?): CodeFormat? {
+-            return values().firstOrNull { it.code == name }
+-        }
+-    }
+ }
+diff --git a/android/src/main/java/com/rncamerakit/QRCodeAnalyzer.kt b/android/src/main/java/com/rncamerakit/QRCodeAnalyzer.kt
+index dd3bfc6..a5bf694 100644
+--- a/android/src/main/java/com/rncamerakit/QRCodeAnalyzer.kt
++++ b/android/src/main/java/com/rncamerakit/QRCodeAnalyzer.kt
+@@ -1,48 +1,65 @@
+ package com.rncamerakit
+ 
+-import android.annotation.SuppressLint
+-import android.util.Size
+ import androidx.camera.core.ExperimentalGetImage
+ import androidx.camera.core.ImageAnalysis
+ import androidx.camera.core.ImageProxy
+-import com.google.mlkit.vision.barcode.BarcodeScanning
+-import com.google.mlkit.vision.barcode.common.Barcode
+-import com.google.mlkit.vision.common.InputImage
++import qr.QRDecoder
++import qr.QRDecodingException
+ 
+-class QRCodeAnalyzer (
+-    private val onQRCodesDetected: (qrCodes: List<Barcode>, imageSize: Size) -> Unit,
++class QRCodeAnalyzer(
++    private val onQRCodeDetected: (decodedValue: String) -> Unit,
+     private val scanThrottleDelay: Long = 0L
+ ) : ImageAnalysis.Analyzer {
+-    // Time in milliseconds of the last time we dispatched detected barcodes
+-    private var lastBarcodeDetectedTime: Long = 0L
+-    @SuppressLint("UnsafeExperimentalUsageError")
++    // Time in milliseconds of the last time we dispatched detected QR code
++    private var lastQRDetectedTime: Long = 0L
++
+     @ExperimentalGetImage
+     override fun analyze(image: ImageProxy) {
+-        val mediaImage = image.image ?: return
+-
+-        val inputImage = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
+-
+-        val scanner = BarcodeScanning.getClient()
+-        scanner.process(inputImage)
+-            .addOnSuccessListener { barcodes ->
+-                // Throttle callback invocations based on scanThrottleDelay (ms)
+-                val now = System.currentTimeMillis()
+-                if (scanThrottleDelay > 0 && (now - lastBarcodeDetectedTime) < scanThrottleDelay) {
+-                    return@addOnSuccessListener
+-                }
+-
+-                val strBarcodes = mutableListOf<Barcode>()
+-                barcodes.forEach { barcode ->
+-                    strBarcodes.add(barcode ?: return@forEach)
+-                }
+-
+-                if (strBarcodes.isNotEmpty()) {
+-                    lastBarcodeDetectedTime = now
+-                    onQRCodesDetected(strBarcodes, Size(image.width, image.height))
+-                }
++        try {
++            val grayscaleData = extractYPlane(image)
++            val decoded = QRDecoder.decode(image.width, image.height, grayscaleData)
++
++            // Throttle callback invocations based on scanThrottleDelay (ms)
++            val now = System.currentTimeMillis()
++            if (scanThrottleDelay > 0 && (now - lastQRDetectedTime) < scanThrottleDelay) {
++                return
+             }
+-            .addOnCompleteListener {
+-                image.close()
++
++            lastQRDetectedTime = now
++            onQRCodeDetected(decoded)
++        } catch (e: QRDecodingException) {
++            // No QR code found or decoding error - this is expected for most frames
++        } finally {
++            image.close()
++        }
++    }
++
++    /**
++     * Extracts the Y (luminance) plane from a YUV_420_888 ImageProxy.
++     * The Y plane is already grayscale data (1 byte per pixel).
++     * Handles row stride padding when rowStride > width.
++     */
++    private fun extractYPlane(image: ImageProxy): ByteArray {
++        val yPlane = image.planes[0]
++        val yBuffer = yPlane.buffer
++        val rowStride = yPlane.rowStride
++        val width = image.width
++        val height = image.height
++        val yBytes = ByteArray(width * height)
++
++        if (rowStride == width) {
++            // Fast path: contiguous data, no padding
++            yBuffer.rewind()
++            yBuffer.get(yBytes, 0, width * height)
++        } else {
++            // Slow path: handle row stride padding
++            yBuffer.rewind()
++            for (row in 0 until height) {
++                yBuffer.position(row * rowStride)
++                yBuffer.get(yBytes, row * width, width)
+             }
++        }
++
++        return yBytes
+     }
+ }
+diff --git a/android/src/newarch/java/com/rncamerakit/CKCameraManager.kt b/android/src/newarch/java/com/rncamerakit/CKCameraManager.kt
+index cbca7f5..56e362e 100644
+--- a/android/src/newarch/java/com/rncamerakit/CKCameraManager.kt
++++ b/android/src/newarch/java/com/rncamerakit/CKCameraManager.kt
+@@ -154,7 +154,16 @@ class CKCameraManager(context: ReactApplicationContext) : SimpleViewManager<CKCa
+         view?.setScanThrottleDelay(value)
+     }
+ 
++    @ReactProp(name = "allowedBarcodeTypes")
++    override fun setAllowedBarcodeTypes(view: CKCamera?, types: ReadableArray?) {
++        // Fork note: Android uses limpbrains/qr which is QR-only, no barcode filtering.
++        // This prop is accepted for API compatibility but has no effect on Android.
++        // iOS implementation supports this prop.
++    }
++
+     // Methods only available on iOS
++    override fun setIOsSleepBeforeStarting(view: CKCamera?, value: Int) = Unit
++
+     override fun setRatioOverlay(view: CKCamera?, value: String?) = Unit
+ 
+     override fun setRatioOverlayColor(view: CKCamera?, value: Int?) = Unit
+diff --git a/android/src/oldarch/java/com/rncamerakit/CKCameraManager.kt b/android/src/oldarch/java/com/rncamerakit/CKCameraManager.kt
+index 298b889..13f6a93 100644
+--- a/android/src/oldarch/java/com/rncamerakit/CKCameraManager.kt
++++ b/android/src/oldarch/java/com/rncamerakit/CKCameraManager.kt
+@@ -143,7 +143,16 @@ class CKCameraManager(var context: ReactApplicationContext) : SimpleViewManager<
+         view?.setScanThrottleDelay(value)
+     }
+ 
++    @ReactProp(name = "allowedBarcodeTypes")
++    fun setAllowedBarcodeTypes(view: CKCamera?, types: ReadableArray?) {
++        // Fork note: Android uses limpbrains/qr which is QR-only, no barcode filtering.
++        // This prop is accepted for API compatibility but has no effect on Android.
++        // iOS implementation supports this prop.
++    }
++
+     // Methods only available on iOS
++    fun setIOsSleepBeforeStarting(view: CKCamera?, value: Int) = Unit
++
+     fun setRatioOverlay(view: CKCamera?, value: String?) = Unit
+ 
+     fun setRatioOverlayColor(view: CKCamera?, value: Int?) = Unit
+diff --git a/example/android/settings.gradle b/example/android/settings.gradle
+index 65fd3e1..6ef2db2 100644
+--- a/example/android/settings.gradle
++++ b/example/android/settings.gradle
+@@ -4,3 +4,4 @@ extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autoli
+ rootProject.name = 'CameraKitExample'
+ include ':app'
+ includeBuild('../node_modules/@react-native/gradle-plugin')
++// includeBuild('../../../qr')
+diff --git a/example/src/BarcodeScreenExample.tsx b/example/src/BarcodeScreenExample.tsx
+index 9819938..059223c 100644
+--- a/example/src/BarcodeScreenExample.tsx
++++ b/example/src/BarcodeScreenExample.tsx
+@@ -46,6 +46,46 @@ const BarcodeExample = ({ onBack }: { onBack: () => void }) => {
+ 
+   const [cameraType, setCameraType] = useState(CameraType.Back);
+   const [barcode, setBarcode] = useState<string>('');
++  const [fps, setFps] = useState(0);
++  const [scanCount, setScanCount] = useState(0);
++  const [scansPerSec, setScansPerSec] = useState(0);
++
++  // FPS counter using requestAnimationFrame
++  useEffect(() => {
++    let frameCount = 0;
++    let lastTime = performance.now();
++    let animationId: number;
++
++    const measureFps = () => {
++      frameCount++;
++      const now = performance.now();
++      const elapsed = now - lastTime;
++
++      if (elapsed >= 1000) {
++        setFps(Math.round((frameCount * 1000) / elapsed));
++        frameCount = 0;
++        lastTime = now;
++      }
++
++      animationId = requestAnimationFrame(measureFps);
++    };
++
++    animationId = requestAnimationFrame(measureFps);
++
++    return () => {
++      cancelAnimationFrame(animationId);
++    };
++  }, []);
++
++  // Scans per second counter
++  useEffect(() => {
++    const interval = setInterval(() => {
++      setScansPerSec(scanCount);
++      setScanCount(0);
++    }, 1000);
++
++    return () => clearInterval(interval);
++  }, [scanCount]);
+ 
+   useEffect(() => {
+     const t = setTimeout(() => {
+@@ -109,6 +149,11 @@ const BarcodeExample = ({ onBack }: { onBack: () => void }) => {
+             resizeMode="contain"
+           />
+         </TouchableOpacity>
++
++        <View style={styles.fpsContainer}>
++          <Text style={styles.fpsText}>{fps} FPS</Text>
++          <Text style={styles.fpsText}>{scansPerSec} scans/s</Text>
++        </View>
+       </SafeAreaView>
+ 
+       <View style={styles.cameraContainer}>
+@@ -119,7 +164,7 @@ const BarcodeExample = ({ onBack }: { onBack: () => void }) => {
+           flashMode={flashData?.mode}
+           zoomMode="on"
+           focusMode="on"
+-          scanThrottleDelay={2000}
++          scanThrottleDelay={0}
+           torchMode={torchMode ? 'on' : 'off'}
+           onOrientationChange={(e) => {
+             // We recommend locking the camera UI to portrait (using a different library)
+@@ -151,7 +196,7 @@ const BarcodeExample = ({ onBack }: { onBack: () => void }) => {
+           allowedBarcodeTypes={['qr', 'ean-13']}
+           barcodeFrameSize={{ width: 300, height: 150 }}
+           onReadCode={(event) => {
+-            Vibration.vibrate(100);
++            setScanCount((prev) => prev + 1);
+             setBarcode(event.nativeEvent.codeStringValue);
+             console.log('barcode', event.nativeEvent.codeStringValue);
+             console.log('codeFormat', event.nativeEvent.codeFormat);
+@@ -253,4 +298,17 @@ const styles = StyleSheet.create({
+     color: 'white',
+     fontSize: 20,
+   },
++  fpsContainer: {
++    backgroundColor: '#222',
++    borderRadius: 8,
++    paddingHorizontal: 10,
++    paddingVertical: 4,
++    justifyContent: 'center',
++    alignItems: 'flex-end',
++  },
++  fpsText: {
++    color: '#0f0',
++    fontSize: 12,
++    fontFamily: 'monospace',
++  },
+ });
+diff --git a/example/src/CameraExample.tsx b/example/src/CameraExample.tsx
+index cb9cd6a..1f250ac 100644
+--- a/example/src/CameraExample.tsx
++++ b/example/src/CameraExample.tsx
+@@ -243,6 +243,7 @@ const CameraExample = ({ onBack, stress }: { onBack: () => void; stress?: boolea
+             }}
+             torchMode={torchMode ? 'on' : 'off'}
+             shutterPhotoSound
++            iOsSleepBeforeStarting={100}
+             maxPhotoQualityPrioritization="speed"
+             onCaptureButtonPressIn={() => {
+               console.log('capture button pressed in');
+diff --git a/ios/ReactNativeCameraKit/CKCameraManager.mm b/ios/ReactNativeCameraKit/CKCameraManager.mm
+index 6ef4da3..2fc29f0 100644
+--- a/ios/ReactNativeCameraKit/CKCameraManager.mm
++++ b/ios/ReactNativeCameraKit/CKCameraManager.mm
+@@ -23,6 +23,7 @@ @interface RCT_EXTERN_MODULE (CKCameraManager, RCTViewManager)
+ RCT_EXPORT_VIEW_PROPERTY(ratioOverlay, NSString)
+ RCT_EXPORT_VIEW_PROPERTY(ratioOverlayColor, UIColor)
+ RCT_EXPORT_VIEW_PROPERTY(resizeMode, CKResizeMode)
++RCT_EXPORT_VIEW_PROPERTY(iOsSleepBeforeStarting, NSNumber)
+ 
+ RCT_EXPORT_VIEW_PROPERTY(scanBarcode, BOOL)
+ RCT_EXPORT_VIEW_PROPERTY(onReadCode, RCTDirectEventBlock)
+diff --git a/ios/ReactNativeCameraKit/CameraView.swift b/ios/ReactNativeCameraKit/CameraView.swift
+index 1e5cc62..d6cba1a 100644
+--- a/ios/ReactNativeCameraKit/CameraView.swift
++++ b/ios/ReactNativeCameraKit/CameraView.swift
+@@ -483,6 +483,14 @@ public class CameraView: UIView {
+         return allowedTypes.compactMap { CodeFormat(rawValue: $0) }
+     }
+ 
++    private func convertAllowedBarcodeTypes() -> [CodeFormat] {
++        guard let allowedTypes = allowedBarcodeTypes as? [String], !allowedTypes.isEmpty else {
++            return CodeFormat.allCases
++        }
++
++        return allowedTypes.compactMap { CodeFormat(rawValue: $0) }
++    }
++
+     // MARK: - Gesture selectors
+ 
+     @objc func handlePinchToZoomRecognizer(_ pinchRecognizer: UIPinchGestureRecognizer) {
+diff --git a/ios/ReactNativeCameraKit/RealCamera.swift b/ios/ReactNativeCameraKit/RealCamera.swift
+index 135a383..0a7172b 100644
+--- a/ios/ReactNativeCameraKit/RealCamera.swift
++++ b/ios/ReactNativeCameraKit/RealCamera.swift
+@@ -21,7 +21,7 @@ class RealCamera: NSObject, CameraProtocol, AVCaptureMetadataOutputObjectsDelega
+     private let session = AVCaptureSession()
+     // Communicate with the session and other session objects on this queue.
+     private let sessionQueue = DispatchQueue(label: "com.tesla.react-native-camera-kit")
+-
++    
+     // utilities
+     private var setupResult: SetupResult = .notStarted
+     private var isSessionRunning: Bool = false
+diff --git a/package.json b/package.json
+index 0e50004..a34b06b 100644
+--- a/package.json
++++ b/package.json
+@@ -1,8 +1,8 @@
+ {
+-  "name": "react-native-camera-kit",
++  "name": "react-native-camera-kit-no-google",
+   "repository": {
+     "type": "git",
+-    "url": "https://github.com/teslamotors/react-native-camera-kit.git"
++    "url": "https://github.com/limpbrains/react-native-camera-kit-no-google.git"
+   },
+   "publishConfig": {
+     "registry": "https://registry.npmjs.org/"

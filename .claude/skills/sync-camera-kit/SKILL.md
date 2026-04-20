@@ -1,298 +1,190 @@
 ---
 name: sync-camera-kit
-description: Synchronizes changes from Tesla's react-native-camera-kit to no-google fork. Selectively syncs iOS and TypeScript improvements while preserving QR-only Android implementation. Use when user requests to "sync camera kit", "sync react-native-camera-kit", or mentions updating from Tesla upstream.
-version: 1.0.0
+description: Synchronizes changes from Tesla's react-native-camera-kit to no-google fork. Uses git merge with patch-based conflict resolution. Use when user requests to "sync camera kit", "sync react-native-camera-kit", or mentions updating from Tesla upstream.
+version: 2.0.0
 ---
 
 # sync-camera-kit
 
-Selectively synchronize changes from Tesla's react-native-camera-kit to the no-google fork, extracting valuable improvements while preserving the QR-only Android barcode implementation.
+Synchronize changes from Tesla's react-native-camera-kit to the no-google fork using git merge and patch-based conflict resolution.
 
 ## Overview
 
-This skill manages the selective synchronization of changes from the upstream Tesla repository to the limpbrains fork. Unlike `sync-qr` which translates algorithms between languages, this skill performs intelligent hunk-level extraction to benefit from upstream improvements while maintaining the fork's QR-only architecture.
-
-**Key Principle**: ALL files are evaluated for selective sync - no files are completely excluded from upstream improvements.
+This skill manages synchronization from the upstream Tesla repository to the limpbrains fork. It uses a standard git merge workflow with a patch file that captures all no-google customizations for reference during conflict resolution.
 
 ## Repository Context
 
 **Upstream (Tesla):**
-- Path: `/Users/limp/dev/qr-root/react-native-camera-kit-tesla`
+- Remote: `upstream` -> `https://github.com/teslamotors/react-native-camera-kit.git`
 - Android barcode: Google ML Kit (closed source, multi-format)
 - Branch: `master`
 
 **Fork (No-Google):**
 - Path: `/Users/limp/dev/qr-root/react-native-camera-kit-no-google`
+- Remote: `origin` -> `git@github.com:limpbrains/react-native-camera-kit-no-google.git`
 - Android barcode: limpbrains/qr (open source, QR-only)
-- Fork point: `5a709e0`
 - Documentation: `CLAUDE.md` (architecture + sync state)
 
-## File Classification
+**Patch File:**
+- Path: `/Users/limp/dev/qr-root/patches/no-google.patch`
+- Contains: All customizations that differ from upstream
+- Updated: After each successful sync
 
-### Category A: Auto-Sync (No Fork Divergence)
+## 8-Step Sync Workflow
 
-Apply entire file changes directly:
-
-- `/ios/**/*` - All iOS Swift files
-- `/src/**/*.ts`, `/src/**/*.tsx` - TypeScript React Native layer
-- `/src/__tests__/**/*` - Jest tests
-- `/.eslintrc.js`, `/tsconfig.json`, `/jest.config.js` - Build configs
-- `/example/**/*` - Example app
-- `/android/src/main/java/com/rncamerakit/events/**/*` - Event classes
-- `/android/src/*/java/com/rncamerakit/CKCameraManager.kt` - Camera manager
-
-### Category B: Selective Sync (Fork Divergence - Hunk-Level Analysis)
-
-Extract compatible hunks, skip ML Kit-specific code:
-
-- **CKCamera.kt** - Extract non-barcode improvements, preserve String callback
-- **QRCodeAnalyzer.kt** - Extract camera lifecycle improvements, preserve QRDecoder usage
-- **CodeFormat.kt** - Extract new format enums, preserve simplified structure
-- **build.gradle** - Extract shared dependency updates, preserve limpbrains/qr
-- **package.json** - Extract scripts/devDependencies, preserve name/version/repo
-- **README.md** - Extract API updates, preserve fork notice
-- **CLAUDE.md** - Update sync state section only
-- **ReactNativeCameraKit.podspec** - Extract dependency changes, preserve fork URLs
-
-See `CONFLICT_RESOLUTION.md` for detailed hunk classification strategies per file.
-
-## 10-Step Sync Workflow
-
-### Step 1: Check Sync State
-
-Read sync state from fork's `CLAUDE.md`:
+### Step 1: Check Current State
 
 ```bash
-grep -A 10 "## Camera Kit Sync State" /Users/limp/dev/qr-root/react-native-camera-kit-no-google/CLAUDE.md
+cd /Users/limp/dev/qr-root/react-native-camera-kit-no-google
+git status
+git remote -v  # Verify upstream remote exists
 ```
 
-Extract:
-- `Last synchronized upstream commit`: Starting point for diff
-- `Fork version`: Current fork version
+If upstream remote missing:
+```bash
+git remote add upstream https://github.com/teslamotors/react-native-camera-kit.git
+```
 
-If section missing, default to fork point `5a709e0`.
-
-### Step 2: Pull Latest Changes
-
-Update upstream repository:
+### Step 2: Fetch Upstream
 
 ```bash
-cd /Users/limp/dev/qr-root/react-native-camera-kit-tesla
-git fetch origin
-git pull origin master
+git fetch upstream
 ```
 
-### Step 3: Detect Changes
+Check what's new:
+```bash
+git log master..upstream/master --oneline
+```
 
-Get commit range and file changes:
+If no new commits: Exit with "Already up to date".
+
+### Step 3: Create Sync Branch
 
 ```bash
-git log --oneline <last-sync-hash>..HEAD
-git log --name-status --format="%H %s" <last-sync-hash>..HEAD
+git checkout -b sync-upstream-$(date +%Y-%m-%d)
 ```
 
-If no changes: Exit with "Already up to date".
+### Step 4: Merge Upstream
 
-### Step 4: Analyze Changes
-
-Classify changed files by category:
-
-**For each changed file:**
-1. Determine if Category A or Category B
-2. If Category A: Mark for auto-sync
-3. If Category B: Mark for selective sync with specific strategy
-
-Display analysis to user with recommendations.
-
-### Step 5: Apply Changes Selectively
-
-**Category A (Auto-Sync):**
 ```bash
-git diff <last-sync>..HEAD -- <file-path>
+git merge upstream/master
 ```
-Apply entire diff using Edit tool.
 
-**Category B (Selective Sync):**
+This will either:
+- **Clean merge**: No conflicts, proceed to Step 5
+- **Conflicts**: Resolve using guidance below
 
-For each file, use file-specific strategy (see `CONFLICT_RESOLUTION.md`):
+### Step 5: Resolve Conflicts
 
-1. Extract diff hunks
-2. Classify hunks:
-   - **Apply**: Generic improvements (error handling, lifecycle, etc.)
-   - **Skip**: ML Kit dependencies, barcode filtering, Google-specific APIs
-3. Apply compatible hunks only
-4. Log extraction decisions
+Reference `patches/no-google.patch` to understand our customizations.
 
-**Example hunk classification keywords:**
+**Key files that typically conflict:**
 
-Skip if contains:
-- `google.mlkit`, `BarcodeScanner`, `Barcode.FORMAT_*`
-- `onBarcodeRead(List<Barcode>)`, `allowedBarcodeTypes`
-- `fromBarcodeType()`, `toBarcodeType()`
+| File | Our Customization |
+|------|-------------------|
+| `android/build.gradle` | Uses `com.github.limpbrains:qr` instead of Google ML Kit |
+| `android/.../QRCodeAnalyzer.kt` | Uses `QRDecoder.decode()` instead of ML Kit scanner |
+| `android/.../CKCamera.kt` | String callback `onQRCodeDetected(String)` instead of `List<Barcode>` |
+| `android/.../CodeFormat.kt` | Simplified enum without ML Kit conversion methods |
+| `package.json` | Different name/version/repository |
+| `CLAUDE.md` | Fork-specific documentation |
 
-Apply if contains:
-- Error handling patterns (`try/catch`, `onError`)
-- Camera lifecycle (`image.close()`, `cameraProviderFuture`)
-- Focus, zoom, flash improvements
-- New enum values (without ML Kit conversions)
-- Shared dependency version bumps
+**Conflict resolution rules:**
 
-### Step 6: Update CLAUDE.md
+1. **Keep our dependency**: `implementation 'com.github.limpbrains:qr:...'`
+2. **Reject ML Kit**: Any `google.mlkit`, `BarcodeScanner`, `Barcode.FORMAT_*`
+3. **Keep our callback signature**: `onQRCodeDetected(decodedValue: String)`
+4. **Accept upstream improvements**: Camera lifecycle, error handling, iOS changes, TypeScript layer
 
-Add comprehensive sync report to fork's `CLAUDE.md`:
+After resolving:
+```bash
+git add .
+git commit -m "Resolve merge conflicts, preserve no-google customizations"
+```
+
+### Step 6: Verify & Test
+
+```bash
+yarn build    # TypeScript compilation
+yarn lint     # ESLint
+yarn test     # Jest tests
+```
+
+**Critical validation:**
+```bash
+# No Google ML Kit leaked in
+grep -r "google.mlkit" android/  # Should be empty
+
+# Fork dependency intact
+grep "limpbrains/qr" android/build.gradle  # Should find it
+
+# QRDecoder preserved
+grep "QRDecoder.decode" android/src/main/java/com/rncamerakit/QRCodeAnalyzer.kt
+```
+
+### Step 7: Merge to Master & Regenerate Patch
+
+```bash
+git checkout master
+git merge sync-upstream-$(date +%Y-%m-%d)
+
+# Regenerate patch to capture any upstream changes we want to keep
+git diff upstream/master..master > /Users/limp/dev/qr-root/patches/no-google.patch
+```
+
+### Step 8: Update CLAUDE.md & Commit
+
+Update the sync state section in `CLAUDE.md`:
 
 ```markdown
 ## Camera Kit Sync State
 
 **Last synchronized upstream commit**: <new-hash>
-**Upstream version**: <upstream-version>
-**Fork version**: <fork-version>
 **Last sync date**: <ISO-8601>
-**Sync status**: success | partial | conflict
-**Fork point**: 5a709e0
-
-### Changes Synced (commits <old-hash>..<new-hash>)
-
-**iOS Improvements**: [list]
-**TypeScript Layer**: [list]
-**Android (Non-Barcode)**: [list]
-
-### Changes Skipped (Android Barcode Conflicts)
-
-**File.kt** (commits <hash>, <hash>):
-- Upstream: [what changed]
-- Fork: [why incompatible]
-- Action: [what was applied vs skipped]
-
-### Selective Sync Summary
-
-**QRCodeAnalyzer.kt**: [hunks applied vs skipped]
-**CodeFormat.kt**: [hunks applied vs skipped]
-**build.gradle**: [dependencies updated vs preserved]
-
-### Notes
-
-Fork maintains QR-only Android barcode scanning using limpbrains/qr. All files are selectively synced - no files are completely excluded from upstream improvements.
+**Sync status**: success
 ```
 
-### Step 7: Run Tests
-
-Build and validate:
-
+Commit in the parent qr-root repo if patch changed:
 ```bash
-cd /Users/limp/dev/qr-root/react-native-camera-kit-no-google
-yarn build    # TypeScript compilation
-yarn lint     # ESLint
-yarn test     # Jest (minimal tests)
+cd /Users/limp/dev/qr-root
+git add patches/no-google.patch
+git commit -m "Update no-google.patch after camera-kit sync"
 ```
-
-**Critical validation checks:**
-
-```bash
-# Ensure no Google ML Kit leaked in
-grep -r "google.mlkit" android/build.gradle  # Should be empty
-
-# Ensure fork dependency intact
-grep "limpbrains/qr" android/build.gradle    # Should find it
-
-# Ensure QRDecoder preserved
-grep "QRDecoder.decode" android/src/main/java/com/rncamerakit/QRCodeAnalyzer.kt  # Should find it
-```
-
-### Step 8: Report Summary
-
-Display comprehensive summary:
-
-```
-Sync Summary
-============
-Upstream: teslamotors/react-native-camera-kit
-Range: <old-hash>..<new-hash> (N commits)
-
-Files Auto-Synced (Category A): N files
-Files Selectively Synced (Category B): N files
-  - Hunks Applied: N hunks
-  - Hunks Skipped: N hunks (incompatible with QR-only fork)
-
-Build Status: ✓/✗
-Lint Status: ✓/✗
-Test Status: ✓/✗
-
-Key Selective Sync Decisions:
-- QRCodeAnalyzer.kt: [extraction summary]
-- CodeFormat.kt: [extraction summary]
-- build.gradle: [extraction summary]
-```
-
-### Step 9: Commit Changes
-
-Ask user for confirmation, then commit:
-
-```bash
-git add .
-git commit -m "Sync from teslamotors/react-native-camera-kit@<hash>
-
-Selectively synced upstream changes while preserving QR-only Android implementation:
-- [Category A auto-synced files]
-- [Category B selectively synced files with hunk counts]
-
-Upstream range: <old-hash>..<new-hash> (N commits)
-
-Extraction decisions:
-- QRCodeAnalyzer.kt: Applied X hunks, skipped Y hunks (ML Kit incompatible)
-- CodeFormat.kt: Applied X hunks, skipped Y hunks (conversion methods)
-- build.gradle: Updated shared deps, preserved limpbrains/qr
-
-🤖 Generated with Claude Code
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
-```
-
-### Step 10: Final Status
-
-Report completion status to user with:
-- Total files synced
-- Total hunks applied vs skipped
-- Build/lint/test results
-- Next manual actions if needed
 
 ## Success Criteria
 
 A successful sync:
 
-1. ✓ All Category A files synced (entire files)
-2. ✓ All Category B files selectively synced (hunk-level extraction)
-3. ✓ `yarn build` passes
-4. ✓ `yarn lint` passes
-5. ✓ `yarn test` passes
-6. ✓ No Google ML Kit in build.gradle
-7. ✓ QRCodeAnalyzer.kt preserves QRDecoder.decode() usage
-8. ✓ CodeFormat.kt preserves simplified enum structure
-9. ✓ build.gradle preserves limpbrains/qr dependency
-10. ✓ CLAUDE.md sync state updated with extraction details
-11. ✓ Clear commit message with upstream range and selective sync summary
+1. `git merge upstream/master` completed (with or without conflicts)
+2. All conflicts resolved preserving no-google customizations
+3. `yarn build` passes
+4. `yarn lint` passes
+5. `yarn test` passes
+6. No `google.mlkit` in android/ directory
+7. `limpbrains/qr` dependency present in build.gradle
+8. `QRDecoder.decode()` present in QRCodeAnalyzer.kt
+9. `patches/no-google.patch` regenerated
+10. CLAUDE.md sync state updated
 
 ## Rollback Strategy
 
-If sync breaks fork:
+If sync breaks the fork:
 
 ```bash
 cd /Users/limp/dev/qr-root/react-native-camera-kit-no-google
-git reset --hard HEAD~1
-# Review conflict, adjust FILE_MAPPING.md rules
+git checkout master
+git branch -D sync-upstream-<date>  # Delete failed sync branch
 ```
 
-## Related Documentation
+## Quick Reference
 
-- `FILE_MAPPING.md` - Detailed file classification and patterns
-- `CONFLICT_RESOLUTION.md` - Hunk-level strategies per file
-- `SYNC_STRATEGY.md` - High-level sync philosophy
-
-## Key Differences from sync-qr
-
-| Aspect | sync-qr | sync-camera-kit |
-|--------|---------|-----------------|
-| **Task** | Algorithm port | Selective file sync |
-| **Translation** | Heavy (JS→Kotlin) | None (hunk extraction) |
-| **Scope** | Decode-only | ALL files (selective) |
-| **Philosophy** | Port algorithm | Extract improvements |
-| **Complexity** | High (code translation) | Medium (hunk classification) |
+```bash
+# Full sync in one go (if no conflicts expected)
+cd /Users/limp/dev/qr-root/react-native-camera-kit-no-google
+git fetch upstream
+git checkout -b sync-upstream-$(date +%Y-%m-%d)
+git merge upstream/master
+yarn build && yarn lint && yarn test
+git checkout master && git merge sync-upstream-$(date +%Y-%m-%d)
+git diff upstream/master..master > ../patches/no-google.patch
+```
