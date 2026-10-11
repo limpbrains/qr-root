@@ -52,7 +52,7 @@ This section tracks the synchronization state between the JavaScript QR library 
 
 **Changes ported** (d846c9d..951806d, qr v0.7.2): upstream rewrote the decoder (`src/decode.ts`,
 ~3450 lines) around a reusable `_QRScanner`; the Kotlin decoder was re-ported from scratch on
-branch `decoder-v0.7.2` (qr 0.1.0) and the old pipeline (Bitmap/PatternDetector/Transform/
+branch `decoder-v0.7.2` (qr 0.7.2) and the old pipeline (Bitmap/PatternDetector/Transform/
 BitDecoder/ReedSolomon/Interleave) was deleted. New architecture, file by file:
 - `QRScanner.kt` (luma arena, pyramid of up to 4 layers, scan loop, `decode(all)`), `QRDecoder.kt` facade
 - `Layer.kt` (8x8 block min/max, cuts, packed bitmap), `Finder.kt` (both-polarity finder scan/refine),
