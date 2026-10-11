@@ -14,7 +14,7 @@ This document provides comprehensive patterns for translating JavaScript/TypeScr
 | `Uint32Array` | `IntArray` | 32-bit unsigned → signed ints |
 | `number[]` | `IntArray` or `DoubleArray` | Use typed arrays for performance |
 | `T[]` | `Array<T>` or `List<T>` | Generic arrays |
-| `{ x: number, y: number }` | `data class Point(val x: Double, val y: Double)` | Use data classes |
+| `{ x: number, y: number }` record | preallocated mutable class (`Finder.Pattern`) or `DoubleArray` slots | The decoder reuses scratch objects; do not allocate per call |
 | `type Union = A \| B` | `sealed class` or nullable | Context-dependent |
 | `undefined` | `null` | Kotlin has no undefined |
 | `T \| undefined` | `T?` | Nullable type |
@@ -46,7 +46,12 @@ This document provides comprehensive patterns for translating JavaScript/TypeScr
 
 | JavaScript | Kotlin |
 |------------|--------|
-| `new Uint8Array(n)` | `ByteArray(n)` |
+| `new Uint8Array(n)` (pixel/luma data) | `ByteArray(n)`; read as `b.toInt() and 0xFF` |
+| `new Uint8Array(n)` (small values, codewords) | `IntArray(n)`; store `v and 0xFF` if the JS store could wrap |
+| `new Int16Array(n)` | `IntArray(n)`; store `(v shl 16) shr 16` when the value can leave Int16 range, NaN -> 0 |
+| `new Int32Array(n)` / packed bitmap | `IntArray(n)` (JS Int32 bit ops == Kotlin Int bit ops) |
+| `new Float64Array(n)` | `DoubleArray(n)` |
+| typed-array read out of bounds (`undefined`) | Replicate explicitly: arithmetic -> `Double.NaN`, comparisons false, store -> 0. Kotlin throws, so guard the index and return the JS result |
 | `new Array(n).fill(0)` | `IntArray(n)` or `Array(n) { 0 }` |
 | `arr[i]` | `arr[i]` |
 | `arr.length` | `arr.size` |
@@ -73,7 +78,7 @@ This document provides comprehensive patterns for translating JavaScript/TypeScr
 | `a << b` | `a shl b` |
 | `a >> b` | `a shr b` (signed) |
 | `a >>> b` | `a ushr b` (unsigned) |
-| `n >>> 0` (convert to unsigned) | `n and 0xFFFF_FFFF` or `n.toUInt()` |
+| `n >>> 0` (convert to unsigned) | Double: `.toInt()` truncation (non-finite -> 0); Int: `toLong() and 0xFFFF_FFFFL` only if a Long is really needed |
 | `(a & 0xFF)` (mask to byte) | `a and 0xFF` |
 
 ## Math Operations
@@ -83,11 +88,18 @@ This document provides comprehensive patterns for translating JavaScript/TypeScr
 | `Math.sqrt(x)` | `sqrt(x)` (import kotlin.math.sqrt) |
 | `Math.floor(x)` | `floor(x)` (import kotlin.math.floor) |
 | `Math.ceil(x)` | `ceil(x)` (import kotlin.math.ceil) |
-| `Math.round(x)` | `round(x)` (import kotlin.math.round) |
+| `Math.round(x)` | `Math.round(x).toInt()` (java.lang; ties toward +inf like JS). **Never** `kotlin.math.round` (ties to even). Non-finite/large input: `Homography.jsRound(x)` |
 | `Math.min(a, b)` | `min(a, b)` (import kotlin.math.min) |
 | `Math.max(a, b)` | `max(a, b)` (import kotlin.math.max) |
 | `Math.abs(x)` | `abs(x)` (import kotlin.math.abs) |
 | `Math.pow(x, y)` | `x.pow(y)` (import kotlin.math.pow) |
+| `x ** 2` on doubles | `x * x` (bit-identical; V8 pow special-cases 2) |
+| `Math.hypot(a, b)` | `Homography.hypot(a, b)` (V8 port; `kotlin.math.hypot`/`sqrt(a*a+b*b)` differ in the last ulp) |
+| `Math.cbrt(x)` | `Homography.cbrt(x)` (V8/fdlibm port; `StrictMath.cbrt` differs on ~8% of inputs) |
+| `x \| 0` on a double | `Homography.toInt32(x)` (NaN/Inf -> 0, truncate, wrap mod 2^32); `x.toInt()` only when provably finite and in Int range |
+| `x >>> 0` on a double | NaN -> 0, else truncate/wrap to UInt32 (e.g. `if (v.isNaN()) 0 else v.toInt()` for 0..255 values) |
+| `Infinity` (number) | `Double.POSITIVE_INFINITY`; as an option/count (`effort`, `nativeLimit`) `Int.MAX_VALUE` |
+| JS truthiness of a number | `v != 0.0 && !v.isNaN()` |
 
 ## String Operations
 
@@ -110,10 +122,9 @@ This document provides comprehensive patterns for translating JavaScript/TypeScr
 
 | JavaScript | Kotlin |
 |------------|--------|
-| `{ x: 1, y: 2 }` | `Point(x = 1, y = 2)` (use data class) |
+| `{ x: 1, y: 2 }` | write into a preallocated mutable object (`Finder.Pattern`) or scratch array slots; no per-call allocation |
 | `obj.x` | `obj.x` |
 | `obj['key']` | `obj["key"]` (if map) |
-| `{ ...obj, y: 3 }` | `obj.copy(y = 3)` (data class copy) |
 | `Object.keys(obj)` | `obj.keys` (if map) |
 | `Object.values(obj)` | `obj.values` (if map) |
 
@@ -127,49 +138,27 @@ This document provides comprehensive patterns for translating JavaScript/TypeScr
 
 ## Common Patterns
 
-### Pattern 1: Bitmap Access (CRITICAL!)
+### Pattern 1: Error values, not exceptions, on the hot path
+
+The v0.7.2 decoder returns failure values (`Attempt = string | Error`, `FAIL.*`) instead of
+throwing inside the scan loop. Kotlin mirrors that: stage functions return `String?` (or a
+Boolean) and set `QRScanner.fail` to a `Fail` tag; only the `QRDecoder` facade turns the terminal
+tag into an exception. Never introduce try/catch control flow in Layer/Finder/Selection/Projection/
+GridDecoder/RS/Payload.
 
 ```javascript
-// JavaScript - row-major [y][x]
-if (b.data[y][x]) { ... }
-b.data[y][x] = true;
-for (let y = 0; y < height; y++) {
-  for (let x = 0; x < width; x++) {
-    if (b.data[y][x]) process();
-  }
-}
+if (!this.timing(s, map, size)) return FAIL.timing;
 ```
-
 ```kotlin
-// Kotlin - column-major get(x, y)
-if (b.get(x, y) == true) { ... }
-b.set(x, y, true)
-for (y in 0 until height) {
-  for (x in 0 until width) {
-    if (b.get(x, y) == true) process()
-  }
-}
+if (!timing(s, map, size)) { fail = Fail.TIMING; return null }
 ```
 
-**Remember**: x and y are SWAPPED!
+### Pattern 2: Keep the JS expression shape (bit-exact doubles)
 
-### Pattern 2: Point Operations (Use Operator Overloading)
-
-```javascript
-// JavaScript - helper functions
-const pointAdd = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
-const pointSub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
-const pointNeg = (p) => ({ x: -p.x, y: -p.y });
-const p3 = pointAdd(p1, p2);
-```
-
-```kotlin
-// Kotlin - operator overloading (already defined in Types.kt)
-operator fun Point.plus(other: Point) = Point(x + other.x, y + other.y)
-operator fun Point.minus(other: Point) = Point(x - other.x, y - other.y)
-operator fun Point.unaryMinus() = Point(-x, -y)
-val p3 = p1 + p2
-```
+Floating-point results are compared bit-for-bit against JS dumps. Keep operand order and
+grouping exactly (`a * b + c * d`, not a refactored form), do not fuse into `Math.fma`, do not
+replace `/ 2` with `* 0.5` or hoist common subexpressions that change rounding. Every ported
+function carries a `// decode.ts Lxxx-yyy` comment.
 
 ### Pattern 3: Null Safety
 
@@ -198,9 +187,7 @@ if (!condition) throw new Error('Invalid state');
 ```
 
 ```kotlin
-// Kotlin - use specific exception types
-if (!condition) throw QRDecodingException("Invalid state")
-// or use require/check
+// Kotlin - input/option validation only (hot-path failures are Fail tags, see Pattern 1)
 require(condition) { "Invalid state" }
 check(condition) { "Invalid state" }
 ```
@@ -283,88 +270,13 @@ val arr = IntArray(n) { i -> i * 2 }
 val arr = Array(n) { i -> i * 2 }
 ```
 
-### Pattern 9: String Encoding (ECI Example)
+### Pattern 9: String Encoding (ECI)
 
-```javascript
-// JavaScript
-const eciToEncoding = { 1: 'iso-8859-1', 26: 'utf-8', 20: 'shift-jis' };
-function decodeWithEci(bytes: Uint8Array, eci: number = 26): string {
-  const encoding = eciToEncoding[eci];
-  if (!encoding) throw new Error(`Unsupported ECI: ${eci}`);
-  return new TextDecoder(encoding).decode(bytes);
-}
-```
-
-```kotlin
-// Kotlin
-private val eciToEncoding = mapOf(
-  1 to "iso-8859-1",
-  26 to "utf-8",
-  20 to "shift-jis"
-)
-
-private fun decodeWithEci(bytes: ByteArray, eci: Int = 26): String {
-  val encoding = eciToEncoding[eci]
-    ?: throw QRDecodingException("Unsupported ECI: $eci")
-  return String(bytes, Charset.forName(encoding))
-}
-```
-
-**Import needed**: `java.nio.charset.Charset`
-
-### Pattern 10: Bitmap Negate (Inverted QR Example)
-
-```javascript
-// JavaScript
-class Bitmap {
-  negate() {
-    for (let y = 0; y < this.height; y++) {
-      for (let x = 0; x < this.width; x++) {
-        this.data[y][x] = !this.data[y][x];
-      }
-    }
-  }
-}
-
-// Usage with fallback
-try {
-  ({ bl, tl, tr } = findFinder(b));
-} catch (e) {
-  try {
-    b.negate();
-    ({ bl, tl, tr } = findFinder(b));
-  } catch (e2) {
-    b.negate(); // undo
-    throw e;
-  }
-}
-```
-
-```kotlin
-// Kotlin
-class Bitmap {
-  fun negate() {
-    for (y in 0 until height) {
-      for (x in 0 until width) {
-        set(x, y, get(x, y)?.not())  // Note: x, y order!
-      }
-    }
-  }
-}
-
-// Usage with fallback
-val (bl, tl, tr) = try {
-  findFinder(b)
-} catch (e: Exception) {
-  try {
-    b.negate()
-    findFinder(b)
-  } catch (e2: Exception) {
-    b.negate() // undo
-    throw e
-  }
-}
-```
+JS resolves an ECI number to a WHATWG `TextDecoder` label (`ECI_ENCODINGS`, decode.ts L206-233).
+Kotlin maps the same ECI numbers to the Java charset that implements that WHATWG decoder
+(`Payload.ECI_CHARSETS`, e.g. `shift_jis` -> `windows-31j`, `gbk` -> `GB18030`, `euc-kr` ->
+`x-windows-949`), and decodes with `String(bytes, off, len, charset)` (U+FFFD for malformed input,
+like TextDecoder). Unknown/unsupported ECI -> `null` (data failure), never an exception.
 
 ## Kotlin Coding Style Guidelines
 
@@ -382,14 +294,12 @@ object QRDecoder {
 }
 ```
 
-### 2. Use `data class` for Value Objects
+### 2. Preallocated Scratch State, No Per-Call Allocation
 
-```kotlin
-data class Point(val x: Double, val y: Double)
-data class Pattern(val x: Double, val y: Double, val moduleSize: Double)
-```
-
-**Benefits**: Automatic equals(), hashCode(), toString(), copy()
+Use preallocated scratch arrays (`IntArray`/`DoubleArray` arenas sized in the constructor) and mutable
+objects such as `Finder.Pattern` that are overwritten in place; never allocate per call on the hot path
+(no `data class Point`, no `kotlin.Pair` returns, no destructuring of fresh objects). Stages return
+`String?` (or Boolean) and record the failure as a `Fail` tag (see Pattern 1).
 
 ### 3. Prefer `val` over `var`
 
@@ -409,11 +319,11 @@ while (retries < 3) {
 
 ```kotlin
 // Instead of if-else chains
-val mode = when (bits) {
-  "0001" -> EncodingType.NUMERIC
-  "0010" -> EncodingType.ALPHANUMERIC
-  "0100" -> EncodingType.BYTE
-  else -> throw InvalidFormatException("Unknown mode: $bits")
+when (mode) {
+  1 -> readNumeric()
+  2 -> readAlphanumeric()
+  4 -> readBytes()
+  else -> { fail = Fail.DATA; return null }
 }
 ```
 
@@ -427,33 +337,7 @@ for (i in n downTo 0) { ... }       // n to 0
 for (i in 0 until n step 2) { ... } // 0, 2, 4, ...
 ```
 
-### 6. Use Extension Functions
-
-```kotlin
-// Add methods to existing types
-fun Point.distanceTo(other: Point): Double {
-  val dx = x - other.x
-  val dy = y - other.y
-  return sqrt(dx * dx + dy * dy)
-}
-
-// Usage
-val dist = p1.distanceTo(p2)
-```
-
-### 7. Use Operator Overloading
-
-```kotlin
-operator fun Point.plus(other: Point) = Point(x + other.x, y + other.y)
-operator fun Point.minus(other: Point) = Point(x - other.x, y - other.y)
-operator fun Point.unaryMinus() = Point(-x, -y)
-
-// Usage
-val p3 = p1 + p2
-val p4 = -p1
-```
-
-### 8. Use Single-Expression Functions
+### 6. Use Single-Expression Functions
 
 ```kotlin
 // Instead of
@@ -465,7 +349,7 @@ fun double(x: Int): Int {
 fun double(x: Int) = x * 2
 ```
 
-### 9. Use KDoc for Public APIs
+### 7. Use KDoc for Public APIs
 
 ```kotlin
 /**
@@ -478,28 +362,9 @@ fun double(x: Int) = x * 2
 fun decode(image: Image): String { ... }
 ```
 
-### 10. Use Destructuring
-
-```kotlin
-val (bl, tl, tr) = findFinder(b)
-val (x, y) = point
-```
-
 ## Common Pitfalls
 
-### 1. Array Index Order (MOST COMMON BUG!)
-
-❌ **Wrong**:
-```kotlin
-if (b.get(y, x) == true) { ... }  // WRONG!
-```
-
-✅ **Correct**:
-```kotlin
-if (b.get(x, y) == true) { ... }  // Correct - x first!
-```
-
-### 2. Integer Division
+### 1. Integer Division
 
 ```javascript
 // JavaScript - always returns float
@@ -514,7 +379,7 @@ val avg = (a + b) / 2  // 5 / 2 = 2 (truncated!)
 val avg = (a + b).toDouble() / 2  // 5 / 2 = 2.5
 ```
 
-### 3. Unsigned Right Shift
+### 2. Unsigned Right Shift
 
 ```javascript
 // JavaScript
@@ -526,7 +391,7 @@ const x = -1 >>> 1;  // Unsigned right shift
 val x = -1 ushr 1  // Unsigned right shift
 ```
 
-### 4. Array Initialization
+### 3. Array Initialization
 
 ```javascript
 // JavaScript - creates array with undefined elements
@@ -540,7 +405,7 @@ val arr = Array(10) { 0 }  // [0, 0, 0, ...]
 val arr = IntArray(10)  // [0, 0, 0, ...]
 ```
 
-### 5. Loop Bounds
+### 4. Loop Bounds
 
 ```javascript
 // JavaScript - exclusive end
@@ -554,7 +419,7 @@ for (i in 0..n-1) { ... }     // Also correct
 for (i in 0..n) { ... }       // WRONG - includes n!
 ```
 
-### 6. ByteArray vs Uint8Array
+### 5. ByteArray vs Uint8Array
 
 JavaScript `Uint8Array` is unsigned (0-255), but Kotlin `ByteArray` is signed (-128 to 127).
 
@@ -563,7 +428,7 @@ JavaScript `Uint8Array` is unsigned (0-255), but Kotlin `ByteArray` is signed (-
 val unsigned = byte.toInt() and 0xFF  // Convert to unsigned
 ```
 
-### 7. Mutable Parameters
+### 6. Mutable Parameters
 
 ```javascript
 // JavaScript - parameters are mutable
@@ -582,7 +447,7 @@ fun foo(x: Int): Int {
 }
 ```
 
-### 8. Null vs Undefined
+### 7. Null vs Undefined
 
 JavaScript has both `null` and `undefined`. Kotlin only has `null`.
 
@@ -615,8 +480,9 @@ import java.nio.charset.Charset  // For ECI encoding
 | Task | JavaScript | Kotlin |
 |------|------------|--------|
 | Loop 0 to n-1 | `for (let i = 0; i < n; i++)` | `for (i in 0 until n)` |
-| Bitmap get | `b.data[y][x]` | `b.get(x, y)` |
-| Bitmap set | `b.data[y][x] = val` | `b.set(x, y, val)` |
+| Packed bitmap bit | `layer.bitmap[y * words + (x >>> 5)] >>> (x & 31) & 1` | same with `ushr`/`and` (`Layer.bit`) |
+| Round | `Math.round(x)` | `Math.round(x).toInt()` |
+| `x \| 0` | `x \| 0` | `Homography.toInt32(x)` |
 | Bitwise AND | `a & b` | `a and b` |
 | Bitwise OR | `a \| b` | `a or b` |
 | Bitwise XOR | `a ^ b` | `a xor b` |

@@ -1,207 +1,88 @@
 # JavaScript → Kotlin File Mapping
 
-This document provides the complete correspondence between JavaScript source files in qr-paulmillr and Kotlin source files in qr.
+Correspondence between qr-paulmillr (TypeScript) and the Kotlin port in `qr/`, as of the **v0.7.2**
+port (`951806d`). Line numbers are for v0.7.2 `src/decode.ts` / `src/index.ts`; every Kotlin
+function carries a `decode.ts Lxxx-yyy` comment naming its source, so after an upstream change
+`grep -rn "decode.ts L" qr/src/main` finds the Kotlin side of any changed JS range.
 
-## Source Files
+## Source: `src/decode.ts` (3457 lines)
 
-| JavaScript File | Kotlin File(s) | Line Range | Notes |
-|-----------------|----------------|------------|-------|
-| `src/decode.ts` | `PatternDetector.kt` | Lines 1-500 (approx) | Pattern detection, toBitmap, findFinder, findAlignment, detect |
-| `src/decode.ts` | `BitDecoder.kt` | Lines 501-end (approx) | decodeBitmap, readInfoBits, parseInfo, segment decoding |
-| `src/index.ts` | `Transform.kt` | Transform class | Perspective transformation (squareToQuadrilateral, transform) |
-| `src/index.ts` | `GaloisField.kt` | GaloisField class | GF(256) finite field arithmetic, lookup tables |
-| `src/index.ts` | `ReedSolomon.kt` | ReedSolomon class | RS encoder/decoder |
-| `src/index.ts` | `Bitmap.kt` | Bitmap class | 2D bitmap representation, get/set, drawing primitives |
-| `src/index.ts` | `QRInfo.kt` | utils.info | Constants, capacity tables, alignment patterns, version/format bits |
-| `src/index.ts` | `Interleave.kt` | utils.interleave | Block interleaving/de-interleaving |
-| `src/index.ts` | `Types.kt` | Type definitions | Point, Pattern, ErrorCorrection, EncodingType, exceptions |
-| N/A | `Image.kt` | Kotlin-specific | Image data class (Grayscale/RGB/RGBA support) |
-| N/A | `QRDecoder.kt` | Kotlin-specific | Public API entry point |
+| JS (lines) | Kotlin file | Kotlin symbol |
+|---|---|---|
+| `FAIL` (L193-202) | `Types.kt` | `enum class Fail` |
+| `ECI_ENCODINGS`, `*_LENGTH_BITS`, `Payload.create/decode/finish` (L206-369) | `Payload.kt` | `class Payload` (`decode`, `clean`, `ECI_CHARSETS`) |
+| `mul`/`inv` (L130-131) | `GF256.kt` | `GF256.mul`, `GF256.inv` |
+| `dist2`, `distance` (L372-375) | `Homography.kt` | `dist2`, `distance` (+ V8 `hypot`) |
+| `checkVersion` (L376-393) | `GridDecoder.kt` | `GridDecoder.checkVersion` |
+| `squareToQuad`, `adjugate`, `ptMul` (L398-462), `packQuad` (L698-718), `mapPoint` (L905), `snapSize` (L1273) | `Homography.kt` | same names (+ V8 `cbrt`, `jsRound`) |
+| `validateSize`, `validateImage`, `copyWords`/`copyTriples`/`copyLuma` (L142-153, L553-695) | `QRScanner.kt` | `validateSize`, `copyLuma` (plain loops) |
+| `bit` (L719), `growFinders` (L938-951) | `Layer.kt` | `Layer.bit`, `growFinders` |
+| `ratio`, `run`, `cross`, `vertical`, `refinePattern`, `refineTriple`, `fitPattern` (L724-902) | `Finder.kt` | same names |
+| `crossPitch`, `finderPitch`, `edgePitch` (L913-936), `copyPattern` (L953-958) | `Finder.kt` | same names |
+| `swapSet`, `siftDown` (L960-982) | `Selection.kt` | `swapSet`, `siftDown` |
+| `evalLow` (L984-988) | `RS.kt` | `RS.evalLow` |
+| `scanRows.blocks` / `scanRows.bitmap` (L1036-1182) | `Layer.kt` | `computeBlocks`, `computeBitmap` (+ `resizeFrom` for the pyramid) |
+| `scanRows.find` (L1184-1269) | `Finder.kt` | `Finder.find` |
+| `runDecode`/`runDecodeAsync`/`nextTick` (L1276-1313) | — | not ported (sync only) |
+| `_QRScanner` constructor, `addImage`, `stage`, `clean` (L1315-1632) | `QRScanner.kt` | `QRScanner` init, `addImage`, `processLuma`, `stage`, `clean` |
+| `mapQuad`, `mapFinderQuad`, `reserve`, `setAlignments` (L1474-1517) | `Projection.kt` | same names (extension funs on `QRScanner`) |
+| `read`, `perspective`, `searchAlign` (L1635-1712) | `Projection.kt` | same names |
+| `excluded`, `exclude`, `retain`, `makeTriple`, `pickPolarity` (L1715-2014) | `Selection.kt` | same names |
+| `timing`, `findBasicAlign` (L2017-2081) | `Projection.kt` | same names |
+| `report` (L2084-2153) | — | not ported (`pointsOnDetect`) |
+| `upgrade` (L2155-2175) | `Projection.kt` | `upgrade` |
+| `decodeGrid`, `decodeOriented` (L2182-2483) | `GridDecoder.kt` | `decodeGrid`, `decodeOriented`, `decodeFormat` |
+| RS corrector inside `decodeOriented` (L2369-2468) | `RS.kt` | `RS.correct` |
+| `projectQuad`, `projectMap`, `confirm`, `projectWith` (L2487-2793) | `Projection.kt` | same names (+ `project`, `tiles` for v7+ tiles) |
+| `scan` round 0 (L2796-2893) | `QRScanner.kt` / `Selection.kt` | `QRScanner.scan`, `pickMandatory` |
+| `scan` `schedule:` block + nextSet loop (L2895-3024) | `Selection.kt` | `buildSchedule`, `nextSet` |
+| `scan` success bookkeeping / exclusion (~L3025-3098) | `QRScanner.kt` | `QRScanner.scan` |
+| `walk`, `decode` (L3100-3133) | `QRScanner.kt` | `QRScanner.decode(all)` |
+| `decodeQR` (L3135-3150) | `QRDecoder.kt` | `QRDecoder.decode` |
+| `decodeQRBatch` (L3152-3190) | — | not ported (async); covered by reusing one `QRScanner` |
+| `BarcodeDetector` & canvas helpers (L3192-end) | — | not ported (browser) |
+| `DecodeOpts` validation (L522-551) | `QRScanner.kt` | constructor `require`s |
 
-## Excluded Files (Encoding/Browser-Only)
+## Source: `src/index.ts` (spec tables and RS)
 
-These JavaScript files are NOT ported to Kotlin (decode-only library):
+| JS (lines) | Kotlin file | Kotlin symbol |
+|---|---|---|
+| `info.BYTES` closed form (L164-176) | `QRInfo.kt` | `QRInfo.BYTES` (table) |
+| `ECC_LEVELS` (L178), `WORDS_PER_BLOCK` (L181-198), `ECC_BLOCKS` (L201-206) | `QRInfo.kt` / `Types.kt` | `WORDS_PER_BLOCK`, `ECC_BLOCKS` indexed by `ErrorCorrection.ordinal` |
+| `alphabet` alphanumeric (L212) | `QRInfo.kt` | `QRInfo.ALPHANUMERIC` |
+| `formatBits`, `versionBits` | `QRInfo.kt` | same names |
+| `alignmentPatterns`, `size.encode` | `src/test/.../TestEncoder.kt` | test-only `TestEncoder.alignmentPatterns`, `sizeEncode`; the decoder uses `Projection.setAlignments`, a direct port of decode.ts L1505-1517 |
+| `EXP`/`LOG` (L263-273) | `GF256.kt` | `GF256.EXP` (doubled, 510), `GF256.LOG` |
+| `rsGenerator`, `RS_CACHE` (L276-312) | `RS.kt` | `RS.cached` (`rsGenerator` is private in RS.kt) |
+| `rsEcc` (L318-336), `encodeData`, `encodeQR`, `penalty` | `src/test/.../TestEncoder.kt` | test-only encoder |
+| mask predicates `maskCalc` (L446-472) | `QRInfo.kt` | `maskBits` (72-entry table) |
+| everything else (encoding, SVG/GIF output) | — | not ported |
 
-| JavaScript File | Reason for Exclusion |
-|-----------------|----------------------|
-| `src/index.ts` (encode functions) | Kotlin is decode-only |
-| `src/dom.ts` | Browser-specific (DOM, Canvas, Camera) |
+`src/dom.ts` (browser camera/canvas) is not ported.
 
-## Test Files
+## Tests
 
-| JavaScript Test | Kotlin Test(s) | Notes |
-|-----------------|----------------|-------|
-| `test/decode.test.ts` | `VectorTest.kt` | Vector-based decoding tests |
-| `test/decode.test.ts` | `ImageDecodingTest.kt` | JPEG image decoding tests |
-| `test/decode.test.ts` | `QRDecoderTest.kt` | API-level tests |
-| `test/bitmap.test.ts` | `BitmapTest.kt` | Bitmap operations tests |
-| `test/utils.test.ts` (info) | `QRInfoTest.kt` | QR constants/tables tests |
-| `test/utils.test.ts` (GF) | `GaloisFieldTest.kt` | Galois Field tests |
-| `test/utils.test.ts` (RS) | `ReedSolomonTest.kt` | Reed-Solomon tests |
-| `test/qr.test.ts` | N/A (mostly encoding) | Skip encoding tests, port decode integration tests if any |
-| `test/encode.test.ts` | N/A | Excluded (encoding only) |
-| `test/dom.test.ts` | N/A | Excluded (browser only) |
+| JS test | Kotlin test(s) |
+|---|---|
+| `test/decode.test.ts` (DECODED table, image sweeps) | `ImageDecodingTest` (+ generated `ImageVectors.kt`), `RealImageTest` |
+| `test/decode.test.ts` (synthetic symbols, options, errors) | `SyntheticTest`, `QRScannerTest`, `QRDecoderTest` |
+| `test/decode-batch.test.ts` | `QRScannerTest` (scanner reuse, all mode, batch order) |
+| `test/utils.test.ts` | `QRInfoTest`, `RSTest`, `PayloadTest` |
+| `test/misc/jpg.ts`, `test/misc/png.ts` | `JpegLuma.kt`, `PngLuma.kt` |
+| `test/jpg.test.ts`, `test/png.test.ts` | `LumaParityTest` (luma CRC guard) |
+| `test/decode-async.test.ts`, `dom*.test.ts`, `encode.test.ts`, `gif.test.ts`, `polyfill.test.ts` | not ported |
+| `encodeQR` fixtures | `TestEncoder.kt`, `TestEncoderTest` |
+| small vectors (qr-code-vectors) | `VectorTest` |
+| JS stage dumps (`tools/js-dump`) | `LayerDumpTest`, `FinderDumpTest`, `ScheduleDumpTest`, `HomographyTest` |
 
-## Function/Class Mapping
+## Kotlin-only
 
-### Pattern Detection (decode.ts → PatternDetector.kt)
+| Feature | Location |
+|---|---|
+| Gray / Y-plane input with offset + stride, `processLuma` zero-copy | `QRScanner.addImage`, `copyLuma`, `Image.format` |
+| Synchronous reusable `QRScanner` API (`decode(all)`, `lastFailure`) | `QRScanner.kt` |
+| Exception facade over `Fail` tags, growing shared scanner | `QRDecoder.kt` |
+| ECI 2 via Java `IBM437` (JS fails: no TextDecoder label) | `Payload.ECI_CHARSETS` |
 
-| JavaScript Function | Kotlin Function | Notes |
-|---------------------|-----------------|-------|
-| `toBitmap(img: Image)` | `PatternDetector.toBitmap()` | Adaptive thresholding |
-| `findFinder(b: Bitmap)` | `PatternDetector.findFinder()` | Find 3 finder patterns |
-| `findAlignment(b, bl, tl, tr)` | `PatternDetector.findAlignment()` | Find alignment pattern |
-| `detect(img: Image)` | `PatternDetector.detect()` | Full detection pipeline |
-
-### Data Decoding (decode.ts → BitDecoder.kt)
-
-| JavaScript Function | Kotlin Function | Notes |
-|---------------------|-----------------|-------|
-| `readInfoBits(b: Bitmap, ...)` | `BitDecoder.readInfoBits()` | Read format/version bits |
-| `parseInfo(...)` | `BitDecoder.parseInfo()` | Parse ECC/version/mask |
-| `decodeBitmap(b: Bitmap)` | `BitDecoder.decodeBitmap()` | Full bitmap decode |
-| `decodeWithEci(bytes, eci)` | `BitDecoder.decodeWithEci()` | ECI character encoding |
-
-### Transformation (index.ts → Transform.kt)
-
-| JavaScript Function | Kotlin Function | Notes |
-|---------------------|-----------------|-------|
-| `squareToQuadrilateral(...)` | `Transform.squareToQuadrilateral()` | Perspective transform matrix |
-| `transform(from, to, w, h)` | `Transform.transform()` | Apply transformation |
-
-### Galois Field (index.ts → GaloisField.kt)
-
-| JavaScript Property/Method | Kotlin Property/Method | Notes |
-|---------------------------|------------------------|-------|
-| `GF.exp(i)` | `GaloisField.exp(i)` | Exponentiation table lookup |
-| `GF.log(x)` | `GaloisField.log(x)` | Logarithm table lookup |
-| `GF.mul(a, b)` | `GaloisField.mul(a, b)` | Multiply in GF(256) |
-| `GF.add(a, b)` | `GaloisField.add(a, b)` | Add in GF(256) (XOR) |
-| `GF.inv(x)` | `GaloisField.inv(x)` | Multiplicative inverse |
-| `GF.pow(base, exp)` | `GaloisField.pow(base, exp)` | Exponentiation |
-
-### Reed-Solomon (index.ts → ReedSolomon.kt)
-
-| JavaScript Class/Method | Kotlin Class/Method | Notes |
-|------------------------|---------------------|-------|
-| `new ReedSolomon(eccWords)` | `ReedSolomon(eccWords)` | Constructor |
-| `rs.encode(data)` | `rs.encode(data)` | Generate error correction codes |
-| `rs.decode(data)` | `rs.decode(data)` | Correct errors |
-
-### Bitmap (index.ts → Bitmap.kt)
-
-| JavaScript Property/Method | Kotlin Property/Method | Notes |
-|---------------------------|------------------------|-------|
-| `b.data[y][x]` | `b.get(x, y)` | **CRITICAL: x and y are SWAPPED!** |
-| `b.data[y][x] = val` | `b.set(x, y, val)` | **CRITICAL: x and y are SWAPPED!** |
-| `b.width` | `b.width` | Same |
-| `b.height` | `b.height` | Same |
-| `new Bitmap(w, h)` | `Bitmap(w, h)` | Constructor |
-| `b.negate()` | `b.negate()` | Invert all bits (for inverted QR) |
-| `b.slice(x, y, w, h)` | `b.slice(x, y, w, h)` | Extract sub-bitmap |
-
-### Interleave (index.ts → Interleave.kt)
-
-| JavaScript Function | Kotlin Function | Notes |
-|---------------------|-----------------|-------|
-| `interleave(version, ecc)` | `Interleave(version, ecc)` | Constructor |
-| `interleave.deinterleave(data)` | `interleave.deinterleave(data)` | Split into blocks |
-| `interleave.interleave(blocks)` | `interleave.interleave(blocks)` | Merge blocks |
-
-### QR Info (index.ts → QRInfo.kt)
-
-| JavaScript Property/Function | Kotlin Property/Function | Notes |
-|-----------------------------|--------------------------|-------|
-| `utils.info.capacity(version, ecc)` | `QRInfo.capacity(version, ecc)` | Get data capacity |
-| `utils.info.sizeEncode(version)` | `QRInfo.sizeEncode(version)` | QR size from version |
-| `utils.info.alignmentPattern(version)` | `QRInfo.alignmentPattern(version)` | Alignment positions |
-| `utils.info.MASK_PATTERNS` | `QRInfo.MASK_PATTERNS` | 8 mask patterns |
-
-### Types (index.ts → Types.kt)
-
-| JavaScript Type | Kotlin Type | Notes |
-|-----------------|-------------|-------|
-| `Point` interface | `data class Point` | x, y coordinates |
-| `Pattern` interface | `data class Pattern` | x, y, moduleSize |
-| `ErrorCorrection` type | `enum class ErrorCorrection` | L, M, Q, H |
-| `EncodingType` type | `enum class EncodingType` | NUMERIC, ALPHANUMERIC, BYTE |
-| Error classes | Exception hierarchy | QRDecodingException, FinderNotFoundException, etc. |
-
-## Critical Coordinate Swap Warning
-
-**MOST COMMON SOURCE OF BUGS**: Bitmap array access order is different!
-
-### JavaScript (row-major with [y][x])
-```javascript
-if (b.data[y][x]) { ... }
-b.data[y][x] = true;
-```
-
-### Kotlin (column-major with get(x, y))
-```kotlin
-if (b.get(x, y) == true) { ... }
-b.set(x, y, true)
-```
-
-**Rule**: When porting, ALWAYS swap the x and y parameters!
-
-### Pattern to Watch For
-
-In JavaScript, you'll often see nested loops like:
-```javascript
-for (let y = 0; y < height; y++) {
-  for (let x = 0; x < width; x++) {
-    if (b.data[y][x]) { ... }  // y first!
-  }
-}
-```
-
-In Kotlin, this becomes:
-```kotlin
-for (y in 0 until height) {
-  for (x in 0 until width) {
-    if (b.get(x, y) == true) { ... }  // x first!
-  }
-}
-```
-
-## Line Number Approximations
-
-These are approximate line ranges for decode.ts (may shift with updates):
-
-| Section | JavaScript Lines | Kotlin File | Function |
-|---------|------------------|-------------|----------|
-| Imports & types | 1-50 | Types.kt | Type definitions |
-| toBitmap | 50-200 | PatternDetector.kt | Adaptive thresholding |
-| findFinder | 200-500 | PatternDetector.kt | Pattern detection |
-| findAlignment | 500-600 | PatternDetector.kt | Alignment detection |
-| detect (main) | 600-700 | PatternDetector.kt | Detection pipeline |
-| readInfoBits | 700-800 | BitDecoder.kt | Read format/version |
-| parseInfo | 800-850 | BitDecoder.kt | Parse info bits |
-| decodeBitmap | 850-end | BitDecoder.kt | Decode data |
-
-**Note**: Always use `git diff` to see actual changed lines, don't rely on line numbers alone.
-
-## Usage During Sync
-
-When processing a change:
-
-1. **Identify source file** from git diff (e.g., `src/decode.ts`)
-2. **Look up in this mapping** to find target Kotlin file(s)
-3. **Check line range** if multiple targets (PatternDetector vs BitDecoder)
-4. **Apply function mapping** to find specific Kotlin function
-5. **Remember coordinate swap** for Bitmap operations
-6. **Port the change** to identified Kotlin location
-
-## Kotlin-Only Enhancements to Preserve
-
-These features exist ONLY in Kotlin - preserve them during sync:
-
-| Feature | Location | Description |
-|---------|----------|-------------|
-| Grayscale input | Image.kt, PatternDetector.kt | Direct Y-plane processing (3-5x faster) |
-| Triangle validation | PatternDetector.kt:384-401 | Validate finder patterns form valid triangle |
-| Threshold retry | QRDecoder.kt:21 | Retry with offsets [-5, 0, 5] |
-| Relaxed finder variance | PatternDetector.kt:229-246 | Progressive variance relaxation (2.0 → 2.5 → 3.0) |
-
-When porting changes that touch these areas, ensure Kotlin enhancements are NOT removed or broken.
+The old Kotlin-only heuristics (threshold-offset retry, triangle validation, relaxed finder variance)
+were dropped with the v0.7.2 port; do not reintroduce them.

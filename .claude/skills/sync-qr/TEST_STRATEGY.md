@@ -4,18 +4,40 @@ This document describes how to synchronize test cases between the JavaScript QR 
 
 ## Test File Correspondence
 
-| JavaScript Test File | Kotlin Test File(s) | Description |
-|---------------------|---------------------|-------------|
-| `test/decode.test.ts` | `VectorTest.kt` | Vector-based integration tests using ASCII-art QR codes |
-| `test/decode.test.ts` | `ImageDecodingTest.kt` | JPEG image decoding tests (BoofCV dataset) |
-| `test/decode.test.ts` | `QRDecoderTest.kt` | Public API tests, format detection |
-| `test/bitmap.test.ts` | `BitmapTest.kt` | Bitmap class operations |
-| `test/utils.test.ts` | `QRInfoTest.kt` | QR constants, version info, alignment patterns |
-| `test/utils.test.ts` | `GaloisFieldTest.kt` | GF(256) arithmetic tests |
-| `test/utils.test.ts` | `ReedSolomonTest.kt` | Reed-Solomon error correction tests |
-| `test/qr.test.ts` | N/A (mostly encoding) | Skip encoding tests |
-| `test/encode.test.ts` | N/A | Excluded (encoding only) |
-| `test/dom.test.ts` | N/A | Excluded (browser only) |
+| JavaScript test | Kotlin test(s) | Description |
+|---|---|---|
+| `test/decode.test.ts` (DECODED table, image sweeps) | `ImageDecodingTest`, `RealImageTest` | Strict per-image parity with JS dumps; generated `ImageVectors.kt` |
+| `test/decode.test.ts` (synthetic symbols, options, errors) | `SyntheticTest`, `QRScannerTest`, `QRDecoderTest` | TestEncoder-built symbols, option validation, facade exceptions |
+| `test/decode-batch.test.ts` | `QRScannerTest` | Scanner reuse, all mode, batch order |
+| `test/utils.test.ts` | `QRInfoTest`, `RSTest`, `PayloadTest` | Spec tables, RS corrector, segment parser |
+| `test/jpg.test.ts`, `test/png.test.ts` (+ `test/misc/jpg.ts`, `png.ts`) | `LumaParityTest` (+ `JpegLuma`, `PngLuma`) | Test-only image readers, luma CRC guard |
+| qr-code-vectors `small-vectors.json.gz` | `VectorTest` | All 9281 must decode |
+| JS stage dumps (`qr/tools/js-dump`) | `LayerDumpTest`, `FinderDumpTest`, `ScheduleDumpTest`, `HomographyTest`, `TestEncoderTest` | Stage-level bit-exact parity |
+| `test/decode-async.test.ts`, `dom*.test.ts`, `encode.test.ts`, `gif.test.ts`, `polyfill.test.ts`, `qr.test.ts` | — | Not ported (async, browser, encoding) |
+
+## Parity Workflow (primary)
+
+The Kotlin decoder is checked against **fixtures dumped from the JS sources**, not just against
+hand-ported assertions. After bumping `qr-paulmillr`:
+
+1. Regenerate every fixture with the commands in `qr/tools/README.md` (node >= 22,
+   `--experimental-strip-types`; `JS=../qr-paulmillr`). This covers `ImageVectors.kt`
+   (`extract_decoded.py`), `dumps/decode-default.json` + `decode-all.json` (`dump-decode.mjs`),
+   `dumps/layers` + `dumps/schedule` (`dump-layers.mjs`, `--schedule`), `boofcv-luma-crc32.json`
+   (`luma-crc.mjs`), V8 math and encoder fixtures.
+2. `git -C qr diff --stat src/test` shows which stages changed upstream; port the matching JS
+   ranges (FILE_MAPPING.md) until `./gradlew test` is green again.
+3. **Luma CRC guard first**: if `LumaParityTest` fails, the JS test image readers changed — port
+   `test/misc/jpg.ts` / `png.ts` into `JpegLuma`/`PngLuma` before touching the decoder (every other
+   image fixture depends on identical luma).
+4. **Strict table**: `ImageDecodingTest` fails on any mismatch (text or fail tag, default and all
+   mode, 565 images; DECODED first-ok/all-set table). Its `KNOWN_DIVERGENCES` hook must stay empty
+   unless the user accepts a deviation (document it in qr/CLAUDE.md "Accepted Deviations").
+5. Hand-written JS tests (decode.test.ts, decode-batch.test.ts, utils.test.ts) are ported with the
+   assertion patterns below.
+
+`./gradlew test -PskipExhaustive` skips the slow image/vector sweeps for quick iteration;
+`-PonlyExhaustive` runs only them.
 
 ## Test Framework Differences
 
@@ -293,42 +315,18 @@ fun `vector tests`() {
 }
 ```
 
-### Pattern 4: Bitmap Test
+## Test Coverage Expectations (baseline, v0.7.2, 2026-10-11)
 
-```javascript
-// JavaScript
-it('should get and set bitmap values', () => {
-  const b = new Bitmap(10, 10);
-  b.data[5][3] = true;
-  assert.strictEqual(b.data[5][3], true);
-});
-```
+| Suite | Baseline | Acceptable |
+|---|---|---|
+| VectorTest (small-vectors) | 9281/9281 | 9281/9281 |
+| ImageDecodingTest default mode vs `decode-default.json` | 565/565 | 565/565 |
+| ImageDecodingTest all mode vs `decode-all.json` | 565/565 | 565/565 |
+| DECODED table (536 detection images) | default 311 = JS 311; all 326 = JS 326 | equal to JS |
+| LumaParityTest | 539/539 CRCs | all |
+| `./gradlew test` | 748 tests, 0 failures (~18 s) | 0 failures |
 
-```kotlin
-// Kotlin - remember x/y swap!
-@Test
-fun `should get and set bitmap values`() {
-  val b = Bitmap(10, 10)
-  b.set(3, 5, true)  // x=3, y=5 (swapped!)
-  assertEquals(true, b.get(3, 5))
-}
-```
-
-**CRITICAL**: `b.data[y][x]` becomes `b.get(x, y)` - x and y are swapped!
-
-## Test Coverage Expectations
-
-After synchronizing tests, Kotlin should maintain similar pass rates:
-
-| Test Suite | Baseline Pass Rate | Acceptable Range |
-|------------|-------------------|------------------|
-| VectorTest (small-vectors) | 98.42% (9134/9281) | ≥ 98% |
-| ImageDecodingTest (boofcv) | 95.76% (113/118) | ≥ 95% |
-
-**If pass rate drops below acceptable range**:
-- Investigate failures before committing
-- Check for porting errors (x/y swap, off-by-one, type mismatches)
-- Verify test data is up to date
+Any drop is a porting bug (or an upstream change whose fixtures were not regenerated).
 
 ## Auto-Fix Test Failures
 
@@ -383,19 +381,16 @@ NullPointerException
 - Add `?.` for safe navigation
 - Add `?: defaultValue` for default
 
-### Fix Category 5: Bitmap Coordinate Errors
+### Fix Category 5: Numeric Drift (parity fixtures)
 
-**Symptom**:
-```
-Expected: "Hello world"
-Actual: "Garbled text" or wrong output
-```
+**Symptom**: a `LayerDumpTest`/`FinderDumpTest`/`ScheduleDumpTest` value differs in the last digits,
+or ImageDecodingTest differs on a handful of images.
 
-**Cause**: Bitmap get/set calls with swapped x/y
+**Cause**: an expression whose rounding differs from JS: reordered operands, `kotlin.math.round`,
+`Math.hypot`/`cbrt` from java.lang, `x.toInt()` where JS uses `| 0` on NaN/Infinity, a missing
+out-of-bounds `undefined` -> NaN replication. See TRANSLATION_PATTERNS.md.
 
-**Fix**: Search for `b.get(` and `b.set(` calls, verify order:
-- Should be `get(x, y)` not `get(y, x)`
-- Check surrounding loops to determine correct order
+**Fix**: diff the Kotlin function against its `decode.ts Lxxx-yyy` source token by token.
 
 ### Fix Category 6: Character Encoding
 
@@ -408,8 +403,8 @@ Actual: "æ—¥æœ¬èª??"
 **Cause**: Missing or incorrect ECI encoding support
 
 **Fix**:
-- Ensure `decodeWithEci()` function is ported
-- Add missing encodings to `eciToEncoding` map
+- Check the ECI number is mapped in `Payload.ECI_CHARSETS`
+- Add missing encodings to `Payload.ECI_CHARSETS`
 - Verify charset names are correct
 
 ## Auto-Fix Process
@@ -441,7 +436,7 @@ Actual: "æ—¥æœ¬èª??"
    Test Synchronization Results:
 
    ✓ Ported 15 new test cases
-   ✓ VectorTest: 9134/9281 (98.42%) - maintained
+   ✓ VectorTest: 9281/9281 - maintained
    ✗ ImageDecodingTest: 110/118 (93.22%) - 3 regressions
 
    Remaining failures:
@@ -509,6 +504,6 @@ When porting tests:
 - [ ] Translate assertions with **correct parameter order** (expected first!)
 - [ ] Handle exception tests with assertThrows<Type> { }
 - [ ] Update test vectors submodule if needed
-- [ ] Run tests and verify pass rate ≥ baseline
+- [ ] Regenerate fixtures (qr/tools/README.md) and run tests: every parity suite at baseline
 - [ ] Apply auto-fixes for common failures
 - [ ] Report any remaining issues with diagnostic info

@@ -69,47 +69,36 @@ git show <commit> --name-status
 Filter commits to identify decode-related changes.
 
 **Include patterns** (decode-related):
-- `src/decode.ts` - ALL changes (core decode file)
-- `src/index.ts` - PARTIAL (Bitmap, Transform, GF, RS, Interleave, utils)
-- `test/decode.test.ts` - Decode tests
-- `test/bitmap.test.ts` - Bitmap tests
-- `test/utils.test.ts` - Utility tests (GF, RS)
-- `test/qr.test.ts` - Integration tests (decode portions)
+- `src/decode.ts` - ALL changes (core decode file; ignore the BarcodeDetector/canvas tail)
+- `src/index.ts` - PARTIAL (spec tables `BYTES`/`WORDS_PER_BLOCK`/`ECC_BLOCKS`, GF `EXP`/`LOG`, `rsGenerator`/`RS_CACHE`, mask predicates, format/version bits)
+- `test/decode.test.ts`, `test/decode-batch.test.ts`, `test/utils.test.ts`
+- `test/misc/jpg.ts`, `test/misc/png.ts`, `test/jpg.test.ts`, `test/png.test.ts` (luma readers used by every image fixture)
+- `test/vectors` submodule bumps
 
 **Exclude patterns** (encoding/browser-only):
-- `src/index.ts` - Encoding functions (encode, drawTemplate, generateECC, maskScore, etc.)
-- `src/dom.ts` - ALL changes (browser-specific)
-- `test/encode.test.ts` - ALL changes
-- `test/dom.test.ts` - ALL changes
+- `src/index.ts` - Encoding functions (encode*, draw*, penalty*, SVG/GIF output) — except when `TestEncoder.kt` mirrors them (synthetic symbols)
+- `src/dom.ts`, `test/dom*.test.ts`, `test/encode.test.ts`, `test/gif.test.ts`, `test/polyfill.test.ts`, `test/decode-async.test.ts`
 - `README.md`, `package.json`, config files - Non-code
 
-**Function-level filtering for index.ts**:
-For changes in `src/index.ts`, extract function/class names and check:
-- **Include**: Bitmap class, Transform functions, GaloisField, ReedSolomon, Interleave, utility functions
-- **Exclude**: encode*, draw*, generate*, mask*, penalty* functions
+**Scale check**: if `src/decode.ts` changed structurally (hundreds of lines, renamed/reordered
+pipeline stages, new layer/scanner design — like the v0.7.2 rewrite), STOP the incremental flow:
+tell the user it needs a written port plan (stage-by-stage, fixture-first) and do not try to port
+it commit by commit.
 
 Display summary to user:
 ```
 Found 3 commits since last sync:
 
-1. 0fbd0a4 - Add ECI support. Add inverted qr support. Speed-up (579 insertions, 317 deletions)
-   - src/decode.ts: Added ECI decoding, inverted QR fallback
-   - src/index.ts: Bitmap.negate() method
-   - test/decode.test.ts: ECI test cases
-
-2. <hash> - Fix pattern detection edge case
-   - src/decode.ts: Improved finder pattern validation
-
-3. <hash> - Performance optimization in GF operations
-   - src/index.ts: GaloisField lookup table optimization
+1. <hash> - Tighten alignment search radius
+   - src/decode.ts L2041-2081 (findBasicAlign)
+2. <hash> - Fix ECI 25 decoding
+   - src/decode.ts L206-233 (ECI_ENCODINGS), test/decode.test.ts
+3. <hash> - Release 0.7.3 (package.json only) — skip
 
 Changes to port:
-✓ ECI encoding support (decode.ts → BitDecoder.kt)
-✓ Inverted QR support (decode.ts → PatternDetector.kt, Bitmap.kt)
-✓ Bitmap.negate() method (index.ts → Bitmap.kt)
-✓ Pattern detection improvements (decode.ts → PatternDetector.kt)
-✓ GF optimization (index.ts → GaloisField.kt)
-✓ Test cases (decode.test.ts → VectorTest.kt, QRDecoderTest.kt)
+✓ findBasicAlign (decode.ts → Projection.kt QRScanner.findBasicAlign)
+✓ ECI table (decode.ts → Payload.kt ECI_CHARSETS) + test (→ PayloadTest)
+✓ Regenerate fixtures (tools/README.md)
 
 Proceed with porting? (yes/no)
 ```
@@ -120,126 +109,66 @@ For each identified change:
 
 1. **Read JavaScript diff**:
    ```bash
-   git diff <commit>^..<commit> -- src/decode.ts
+   git diff <old>..<new> -- src/decode.ts src/index.ts
    ```
 
-2. **Identify target Kotlin file** using [FILE_MAPPING.md](FILE_MAPPING.md):
-   - `decode.ts` detection logic → `PatternDetector.kt`
-   - `decode.ts` decoder → `BitDecoder.kt`
-   - `index.ts` Bitmap → `Bitmap.kt`
-   - `index.ts` GF → `GaloisField.kt`
-   - etc.
+2. **Identify target Kotlin file/function** with [FILE_MAPPING.md](FILE_MAPPING.md) (decode.ts
+   line range → Layer/Finder/Selection/Projection/GridDecoder/RS/Payload/QRScanner/...). Every
+   Kotlin function cites its source as `decode.ts Lxxx-yyy`; `grep -rn "decode.ts L" qr/src/main`
+   finds it. Update those line references when the JS lines move.
 
-3. **Read current Kotlin code** in target file
+3. **Read the current Kotlin code** next to the old and new JS.
 
-4. **Translate using [TRANSLATION_PATTERNS.md](TRANSLATION_PATTERNS.md)**:
-   - Apply type translations (number → Int/Double, Uint8Array → ByteArray)
-   - Apply syntax translations (for loops → ranges, bitwise → and/or/xor)
-   - Apply Kotlin idioms (when expressions, null safety, operators)
-   - Preserve Kotlin style (object, data classes, val over var)
-   - Handle special cases (see TRANSLATION_PATTERNS.md)
+4. **Translate line by line using [TRANSLATION_PATTERNS.md](TRANSLATION_PATTERNS.md)**: keep the
+   JS expression shape and operand order (bit-exact doubles), `Math.round(x).toInt()` (never
+   `kotlin.math.round`), `Homography.hypot/cbrt/toInt32`, NaN semantics for out-of-bounds typed-array
+   reads, Fail tags instead of exceptions on the hot path. No defensive checks the JS lacks.
 
-5. **Edit Kotlin file** with translated code
+5. **Preserve Kotlin-only behaviour** (FILE_MAPPING.md "Kotlin-only"): gray/Y-plane input with
+   offset/stride, the synchronous `QRScanner` API, the `QRDecoder` exception facade, ECI 2 via IBM437.
 
-6. **Preserve Kotlin-only enhancements**:
-   - Grayscale input support (Image.kt, PatternDetector.kt)
-   - Triangle validation (PatternDetector.kt)
-   - Threshold retry (QRDecoder.kt)
-   - Relaxed finder variance (PatternDetector.kt)
+### Step 6: Sync Tests and Regenerate Fixtures
 
-**Critical reminders**:
-- Bitmap access: `b.data[y][x]` (JS) → `b.get(x, y)` (Kotlin) - **x and y are SWAPPED!**
-- Arrays: `new Uint8Array(n)` → `ByteArray(n)`
-- Bitwise: `a & b` → `a and b`, `a | b` → `a or b`, `a ^ b` → `a xor b`
-- Loops: `for (let i = 0; i < n; i++)` → `for (i in 0 until n)`
+1. **Regenerate the JS parity fixtures** — this is the main test sync. From `qr/`, run the
+   commands in `qr/tools/README.md` ("Regenerating everything") against `../qr-paulmillr`:
+   `extract_decoded.py` (ImageVectors.kt), `dump-decode.mjs` / `--all` (decode-default/all.json),
+   `dump-layers.mjs` / `--schedule` (dumps/layers, dumps/schedule), `luma-crc.mjs`
+   (boofcv-luma-crc32.json), `math-fixtures.mjs`, `encoder-fixtures.mjs`. `git diff --stat src/test`
+   then shows which pipeline stages changed upstream.
 
-### Step 6: Sync Tests
-
-For each relevant test change:
-
-1. **Identify Kotlin test file** using [TEST_STRATEGY.md](TEST_STRATEGY.md):
-   - `decode.test.ts` → `VectorTest.kt`, `ImageDecodingTest.kt`, `QRDecoderTest.kt`
-   - `bitmap.test.ts` → `BitmapTest.kt`
-   - `utils.test.ts` → `GaloisFieldTest.kt`, `ReedSolomonTest.kt`, `QRInfoTest.kt`
-
-2. **Translate test** using test framework mappings (see TEST_STRATEGY.md):
-   - `it('should X')` → `@Test fun \`should X\`()`
+2. **Port hand-written JS tests** using [TEST_STRATEGY.md](TEST_STRATEGY.md):
+   - `decode.test.ts` → `SyntheticTest`, `ImageDecodingTest`, `RealImageTest`, `QRScannerTest`, `QRDecoderTest`
+   - `decode-batch.test.ts` → `QRScannerTest`
+   - `utils.test.ts` → `QRInfoTest`, `RSTest`, `PayloadTest`
+   - `test/misc/jpg.ts`, `png.ts` → `JpegLuma.kt`, `PngLuma.kt`
    - `assert.strictEqual(a, b)` → `assertEquals(b, a)` (**ORDER SWAPPED!**)
-   - `assert.ok(cond)` → `assertTrue(cond)`
-   - `assert.throws(() => ...)` → `assertThrows<ExceptionType> { ... }`
 
-3. **CRITICAL: Synchronize test vectors submodule**:
-   Both repositories use the same test vectors from a git submodule. They MUST be at the same commit.
+3. **Synchronize the test vectors submodule** — both repos must use the same commit:
 
    ```bash
-   # Check JS library's test vectors version
-   cd /Users/limp/dev/qr-root/qr-paulmillr
-   git submodule status test/vectors  # Note the commit hash
-
-   # Update Kotlin test vectors to match
-   cd /Users/limp/dev/qr-root/qr
-   git submodule update --init --recursive
-   cd test/vectors
-   git checkout <commit-hash-from-js>  # Use the hash from above
+   cd /Users/limp/dev/qr-root/qr-paulmillr && git submodule status test/vectors   # note the hash
+   cd /Users/limp/dev/qr-root/qr && git submodule update --init --recursive
+   git -C test/vectors checkout <commit-hash-from-js>
    ```
-
-   **Important**: Test vectors must be initialized and at the same commit for tests to pass.
 
 ### Step 7: Build and Test
 
-**CRITICAL**: Before comparing test results, ensure both JS and Kotlin test vectors are synchronized:
-
-```bash
-# Update JS test vectors
-cd /Users/limp/dev/qr-root/qr-paulmillr
-git submodule update --init --recursive
-
-# Update Kotlin test vectors (already covered in Step 6)
-cd /Users/limp/dev/qr-root/qr
-git submodule update --init --recursive
-cd test/vectors
-git checkout <commit-hash-from-js>
-```
-
-Build the Kotlin project:
 ```bash
 cd /Users/limp/dev/qr-root/qr
-./gradlew clean build
+./gradlew test                    # full (~18 s)
+./gradlew test -PskipExhaustive   # fast loop without the image/vector sweeps
 ```
 
-If build fails:
-- Review compilation errors
-- Fix type mismatches, imports, syntax errors
-- Common issues: missing imports, wrong types, null safety
+**Goal: strict parity**, not a pass-rate threshold. Baseline (v0.7.2): small-vectors 9281/9281,
+ImageDecodingTest 565/565 default and all mode against the regenerated JS dumps, DECODED table
+311/326 = JS, LumaParityTest all CRCs, 0 failures overall (see TEST_STRATEGY.md).
 
-Run tests:
-```bash
-./gradlew test
-```
-
-**Compare test results with JavaScript**:
-
-Run JS tests:
-```bash
-cd /Users/limp/dev/qr-root/qr-paulmillr
-npm install  # If needed
-npm test
-```
-
-**Goal: Maintain test parity**
-
-Compare pass rates:
-- JS: Check test output for total passed/failed
-- Kotlin: Check VectorTest output (e.g., "9134 / 9281 passed")
-- **Target**: Kotlin pass rate ≥ JS pass rate
-
-If Kotlin pass rate is lower:
-1. Identify which tests pass in JS but fail in Kotlin
-2. Use the debugging algorithm (see Step 8a)
-3. Fix the differences
-4. Re-run tests and verify parity
-
-Capture and parse output.
+Triage order when something fails:
+1. `LumaParityTest` → JS image readers changed; port `jpg.ts`/`png.ts` first.
+2. `LayerDumpTest` → pyramid/binarizer (`Layer.kt`).
+3. `FinderDumpTest` → finder scan/refine/mandatory pick (`Finder.kt`, `Selection.kt`).
+4. `ScheduleDumpTest` → retry schedule (`Selection.kt`).
+5. `ImageDecodingTest` / `SyntheticTest` → projection, grid decode, RS, payload.
 
 ### Step 8a: Debug Algorithm for Test Parity Issues
 
@@ -311,7 +240,7 @@ When a test passes in JS but fails in Kotlin, use this systematic debugging appr
 7. **Identify differences**
    Common issues:
    - ECI encoding mismatch (wrong charset)
-   - Bitmap coordinate swap (x/y reversed)
+   - Numeric drift (operand order, rounding, hypot/cbrt, `| 0` on NaN) — see TRANSLATION_PATTERNS.md
    - Off-by-one errors in loops
    - Null handling differences
    - Integer division vs float division
@@ -360,8 +289,8 @@ If tests fail, attempt automatic fixes (up to 3 iterations).
 3. **Null Safety** (NullPointerException):
    - Fix: Add `?` to types, `!!` or `?.` to access, `?: defaultValue`
 
-4. **Bitmap Access Errors** (wrong results):
-   - Fix: Verify `get(x, y)` not `get(y, x)` order
+4. **Parity mismatch** (dump test or ImageDecodingTest differs):
+   - Fix: diff the Kotlin function against its `decode.ts Lxxx-yyy` source token by token
 
 5. **Encoding Issues** (garbled text):
    - Fix: Ensure ECI encoding map is complete, use correct charset
@@ -392,8 +321,8 @@ Changes ported:
 - Performance optimizations in GF operations (commit <hash>)
 
 Test results:
-- VectorTest: 9134/9281 (98.42%)
-- ImageDecodingTest: 113/118 (95.76%)
+- VectorTest: 9281/9281
+- ImageDecodingTest: default 565/565, all 565/565 vs JS dumps; DECODED 311/326 = JS
 ```
 
 If test failures remain:
@@ -425,17 +354,20 @@ Display commit hash and summary.
 
 See [FILE_MAPPING.md](FILE_MAPPING.md) for complete mappings.
 
-**Quick reference**:
+**Quick reference** (v0.7.2 layout):
 | JavaScript | Kotlin |
 |------------|--------|
-| src/decode.ts (detection) | PatternDetector.kt |
-| src/decode.ts (decoder) | BitDecoder.kt |
-| src/index.ts (Bitmap) | Bitmap.kt |
-| src/index.ts (Transform) | Transform.kt |
-| src/index.ts (GaloisField) | GaloisField.kt |
-| src/index.ts (ReedSolomon) | ReedSolomon.kt |
-| src/index.ts (utils.interleave) | Interleave.kt |
-| src/index.ts (utils.info) | QRInfo.kt |
+| decode.ts pyramid/binarizer (`scanRows.blocks/bitmap`) | Layer.kt |
+| decode.ts finder scan/refine (`ratio`..`fitPattern`, `scanRows.find`) | Finder.kt |
+| decode.ts triple selection, schedule (`excluded`..`pickPolarity`, `scan` schedule) | Selection.kt |
+| decode.ts projection/alignment/timing/tiles | Projection.kt |
+| decode.ts homography, `distance`, `snapSize` | Homography.kt |
+| decode.ts `decodeGrid`/`decodeOriented`, `checkVersion` | GridDecoder.kt (RS corrector → RS.kt) |
+| decode.ts `Payload`, `ECI_ENCODINGS` | Payload.kt |
+| decode.ts `_QRScanner` (constructor, addImage, scan, decode) | QRScanner.kt |
+| decode.ts `decodeQR` | QRDecoder.kt |
+| index.ts spec tables, mask/format/version bits | QRInfo.kt |
+| index.ts `EXP`/`LOG`, `rsGenerator` | GF256.kt, RS.kt |
 
 ## Translation Strategy
 
@@ -444,10 +376,10 @@ See [TRANSLATION_PATTERNS.md](TRANSLATION_PATTERNS.md) for detailed patterns.
 **Key principles**:
 1. Preserve algorithmic correctness above all
 2. Maintain Kotlin coding style (see qr/CLAUDE.md)
-3. Use object singletons, data classes, operator overloading
-4. Prefer `val` over `var`, use when expressions
-5. Apply null safety patterns
-6. Watch for Bitmap x/y swap, array index order, assertion order
+3. Keep the JS expression shape and operand order (bit-exact doubles); every function cites `decode.ts Lxxx-yyy`
+4. Preallocated scratch, typed-array-like IntArray/DoubleArray, Fail tags instead of exceptions on the hot path
+5. No defensive checks the JS lacks; JS rounding/NaN/Int32 semantics via Homography helpers
+6. Watch assertion order in tests (assertEquals(expected, actual))
 
 ## Test Strategy
 
@@ -457,15 +389,16 @@ See [TEST_STRATEGY.md](TEST_STRATEGY.md) for detailed guidelines.
 - Map test files correctly (decode.test.ts → multiple Kotlin tests)
 - Translate assertions with correct order (assertEquals(expected, actual) in Kotlin)
 - Ensure test vectors submodule is updated
-- Maintain test pass rate ≥ baseline (98% vectors, 96% images)
+- Regenerate the JS parity fixtures (qr/tools/README.md); strict parity, no pass-rate tolerance
 
 ## Scope Limitations
 
 **Include (decode-only)**:
-- Pattern detection algorithms
-- Bitmap operations used in decoding
-- Data extraction and parsing
-- Error correction (GF, RS, Interleave)
+- Luma conversion, pyramid, binarizer, finder detection and selection
+- Projection, alignment, sampling
+- Grid decode, payload parsing, ECI
+- Error correction (GF, RS)
+- JS test image readers (test/misc/jpg.ts, png.ts)
 - Performance optimizations in decode path
 - Bug fixes in decode path
 - New decode features (ECI, inverted QR, etc.)
